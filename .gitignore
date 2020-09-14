@@ -1,0 +1,12 @@
+node_modules
+package-lock.json
+dist
+/target
+**/*.rs.bk
+/target
+/project
+/.metals
+/.debug
+/coverage
+/.static
+/register/build
