@@ -8,6 +8,7 @@ import { join } from "path"
 // 内部类型
 type TrackIndex = number
 type NextIndex = number
+type ParseHandle = (value: PrivateIndex, offset: number) => boolean
 
 /**
  * 索引
@@ -70,48 +71,18 @@ export default class {
     }
     
     /**
-     * 初始化
-     * @desc 
-     * 初始化文件句柄以及文件描述
-     * !!! 外部需要强制调用初始化
+     * 解析索引文件
+     * @param handle 处理函数
      */
-    public async initialize() {
-        await this.file.initialize()
-        this.file_size = (await this.file.stat()).size
-    }
-
-    /**
-     * 获取索引
-     * @param name 名称
-     */
-    public async get(name: string): Promise<Result | null> {
-        const key = hash(name)
-        let hit_index = null
-        let offset = 0
-        
-        /**
-         * 检查缓存是否存在
-         * 如果存在缓存则更新缓存并返回
-         */
-    if (this.cache.has(name)) {
-        let value = this.cache.get(name)!
-        value.cycle = Date.now()
-        value.link += 1
-        return value
-    }
-
-        /**
-         * 无限循环
-         * 直到匹配正确结果或者无法匹配
-         */
-    for (let i = 0;; i ++) {
-        offset = i * 66
+    private async parse(handle: ParseHandle) {
+for (let i = 0;; i ++) {
+        const offset = i * 66
 
         /**
          * 排除掉已经缓存的索引
          * 加快查找速度
          */
-        if (this.offsets_cache.has(i * 66)) {
+        if (this.offsets_cache.has(offset)) {
             continue
         }
 
@@ -121,7 +92,7 @@ export default class {
          * 这时候跳出循环
          */
         const buf = Buffer.allocUnsafeSlow(66)
-        const size = await this.file.read(buf, i * 66)
+        const size = await this.file.read(buf, offset)
         if (size === 0) {
             break
         }
@@ -138,24 +109,87 @@ export default class {
         }
 
         /**
+         * 传递给处理函数
+         * 如果返回true则停止循环
+         */
+        if (handle(value, offset)) {
+            break
+        }
+}
+    }
+    
+    /**
+     * 加载索引
+     * @desc 将所有索引加载到内存
+     */
+    private async load_all() {
+await this.parse(({ key, start_matedata, start_chunk }, offset) => {
+        const value = { start_matedata, start_chunk, cycle: Date.now(), link: 0, offset }
+        this.cache.set(key.toString("hex"), value)
+        this.offsets_cache.set(offset, true)
+        return false
+})
+    }
+    
+    /**
+     * 初始化
+     * @desc 
+     * 初始化文件句柄以及文件描述
+     * !!! 外部需要强制调用初始化
+     */
+    public async initialize() {
+        await this.file.initialize() 
+        this.file_size = (await this.file.stat()).size
+        await this.load_all()
+    }
+
+    /**
+     * 获取索引
+     * @param name 名称
+     */
+    public async get(name: string): Promise<Result | null> {
+        const key = hash(name)
+        const key_hex = key.toString("hex")
+        
+        /**
+         * 检查缓存是否存在
+         * 如果存在缓存则更新缓存并返回
+         */
+        if (this.cache.has(key_hex)) {
+            let value = this.cache.get(key_hex)!
+            value.cycle = Date.now()
+            value.link += 1
+            return value
+        }
+
+        /**
+         * 无限循环
+         * 直到匹配正确结果或者无法匹配
+         */
+        let offset = 0
+        let hit: PrivateIndex | null = null
+await this.parse((value, index) => {
+        offset = index
+
+        /**
          * 对比HASH
          * 这里直接对比Buffer
          * 如果不匹配则跳转下个循环
          */
         if (!key.equals(value.key)) {
-            continue
+            return false
         }
 
         // 命中索引
-        hit_index = value
-        break
-    }
+        hit = value
+        return true
+})
 
         /**
          * 如果没有找到索引
          * 则返回Null
          */
-        if (!hit_index) {
+        if (!hit) {
             return null
         }
 
@@ -164,17 +198,17 @@ export default class {
          * 记录存活时间和热度
          */
         this.offsets_cache.set(offset, true)
-        this.cache.set(name, {
-            start_matedata: hit_index!.start_matedata,
-            start_chunk: hit_index!.start_chunk,
+        this.cache.set(key_hex, {
+            start_matedata: hit!.start_matedata,
+            start_chunk: hit!.start_chunk,
             cycle: Date.now(),
             link: 0,
             offset
         })
 
         return {
-            start_matedata: hit_index!.start_matedata,
-            start_chunk: hit_index!.start_chunk,
+            start_matedata: hit!.start_matedata,
+            start_chunk: hit!.start_chunk,
         }
     }
 
@@ -188,12 +222,13 @@ export default class {
      */
     public async set(index: Index): Promise<boolean> {
         const key = hash(index.name)
+        const key_hex = key.toString("hex")
         
         /**
          * 如果索引已经存在
          * 则返回设置失败
          */
-        if (this.cache.has(index.name)) {
+        if (this.cache.has(key_hex)) {
             return false
         }
 
@@ -201,7 +236,8 @@ export default class {
          * 初始化索引信息
          * 将索引存储到内存缓存
          */
-        this.cache.set(index.name, {
+        this.offsets_cache.set(this.file_size, true)
+        this.cache.set(key_hex, {
             start_matedata: index.start_matedata,
             start_chunk: index.start_chunk,
             offset: this.file_size,
