@@ -20,15 +20,15 @@ function defaultKernelData(): Kernel {
  */
 export default class {
     private options: KernelCompleteOptions
-    
+
     /**
-     * @param {options} 核心配置
+     * @param options 核心配置
      * @constructor
      */
     constructor(options: KernelCompleteOptions) {
         this.options = options
     }
-    
+
     /**
      * 默认核心
      * @desc
@@ -40,14 +40,14 @@ export default class {
         kernel_data.track_list.push(new Track(0, this.options))
         return kernel_data
     }
-    
+
     /**
      * 初始化
      */
     public async initialize() {
         const { directory } = this.options
         const index_filename = join(directory, "index")
-        
+
         /**
          * 如果索引文件不存在
          * 则返回空索引

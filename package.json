@@ -2,9 +2,9 @@
     "name": "physeter",
     "version": "1.0.0",
     "description": "",
-    "main": "./dist/",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "dev": "tsc && node --inspect ./dist/index.js",
+        "build": "tsc"
     },
     "author": "Mr.Panda <xivistudios@gmail.com> (https://github.com/quasipaa)",
     "license": "MIT",

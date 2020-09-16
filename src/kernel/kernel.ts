@@ -32,8 +32,7 @@ export interface KernelCompleteOptions extends KernelOptions {
 
 /**
  * 默认配置处理
- * @param {options} 外部配置
- * @returns {KernelCompleteOptions}
+ * @param options 外部配置
  */
 function defaultOptions(options: KernelOptions): KernelCompleteOptions {
     return {
@@ -54,7 +53,7 @@ export default class extends EventEmitter {
     private index_list: Array<Index>
 
     /**
-     * @param {options} 配置
+     * @param options 配置
      * @constructor
      */
     constructor(options: KernelOptions) {
@@ -63,30 +62,30 @@ export default class extends EventEmitter {
         this.index_list = []
         this.options = defaultOptions(options)
     }
-    
+
     /**
      * 读取文件
      * @desc 打开文件读取流
-     * @param {name} 文件名
+     * @param name 文件名
      */
     public read(name: string) {
-        
+
     }
-    
+
     /**
      * 写入文件
      * @desc 打开文件写入流
-     * @param {name} 文件名
+     * @param name 文件名
      */
     public write(name: string) {
-        
+
     }
-    
+
     /**
      * 删除文件
-     * @param {name} 文件名
+     * @param name 文件名
      */
     public delete(name: string) {
-        
+
     }
 }
