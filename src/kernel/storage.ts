@@ -1,17 +1,18 @@
 import { Kernel, KernelCompleteOptions } from "./kernel"
+import SuperEvents from "../lib/super_events"
 import { exists } from "../lib/fs"
-import Track from "./track"
+import { Track } from "./track"
 import { join } from "path"
 
 /**
  * 默认核心数据
+ * @param track 初始轨道
  * @desc 轨道列表和索引列表全为空
  */
-function defaultKernelData(): Kernel {
-    return {
-        track_list: [],
-        index_list: []
-    }
+async function defaultKernelData(track: Track): Promise<Kernel> {
+    await track.initialize()
+    const track_list = [track]
+    return { track_list, index_list: [] }
 }
 
 /**
@@ -20,12 +21,14 @@ function defaultKernelData(): Kernel {
  */
 export default class {
     private options: KernelCompleteOptions
+    private events: SuperEvents<any, any>
 
     /**
      * @param options 核心配置
      * @constructor
      */
     constructor(options: KernelCompleteOptions) {
+        this.events = new SuperEvents()
         this.options = options
     }
 
@@ -35,10 +38,9 @@ export default class {
      * 当索引文件不存在时创建默认索引数据，
      * 同时初始化轨道文件.
      */
-    private default_kernel(): Kernel {
-        let kernel_data = defaultKernelData()
-        kernel_data.track_list.push(new Track(0, this.options))
-        return kernel_data
+    private async default_kernel(): Promise<Kernel> {
+        const track = new Track(0, this.events, this.options)
+        return await defaultKernelData(track)
     }
 
     /**
@@ -53,7 +55,8 @@ export default class {
          * 则返回空索引
          * 并创建初始轨道
          */
-        if (!await exists(index_filename))
-            return this.default_kernel()
+        if (!await exists(index_filename)) {
+            return await this.default_kernel()   
+        }
     }
 }

@@ -85,14 +85,13 @@ async function alloc_all(
     handle: (...argv: number[]) => Promise<number>,
     buf_offset = 0
 ): Promise<any> {
-    for (;;) {
-        const position = offset + buf_offset
-        const length = count_size - buf_offset
-        const size = await handle(buf_offset, length, position)
-        if (buf_offset + size >= count_size) break
-        buf_offset += size
-    }
-}
+for (;;) {
+    const position = offset + buf_offset
+    const length = count_size - buf_offset
+    const size = await handle(buf_offset, length, position)
+    if (buf_offset + size >= count_size) break
+    buf_offset += size
+}}
 
 /**
  * 文件类

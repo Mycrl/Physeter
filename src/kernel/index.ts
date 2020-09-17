@@ -1,13 +1,12 @@
-import { KernelCompleteOptions } from "../kernel"
-import { hash } from "../../lib/util"
-import File from "../../lib/fs"
-import Decoder from "./decoder"
-import Encoder from "./encoder"
+import { KernelCompleteOptions } from "./kernel"
+import { hash } from "../lib/util"
+import Queue from "../lib/queue"
+import File from "../lib/fs"
 import { join } from "path"
 
 // 内部类型
+type NextIndex = bigint
 type TrackIndex = number
-type NextIndex = number
 type ParseHandle = (value: PrivateIndex, offset: number) => boolean
 
 /**
@@ -30,7 +29,7 @@ export interface Result {
 /**
  * 内部索引
  */
-export interface PrivateIndex {
+interface PrivateIndex {
     key: Buffer                                // 名称摘要
     start_chunk: [TrackIndex, NextIndex]       // 分片索引列表
     start_matedata: [TrackIndex, NextIndex]    // 文件信息索引列表
@@ -39,7 +38,7 @@ export interface PrivateIndex {
 /**
  * 索引缓存
  */
-export interface IndexCache {
+interface IndexCache {
     offset: number                             // 索引偏移位置
     cycle: number                              // 存活时间
     link: number                               // 访问次数
@@ -48,10 +47,42 @@ export interface IndexCache {
 }
 
 /**
+ * 解码器
+ * @param chunk 数据
+ */
+function Decoder(chunk: Buffer): PrivateIndex | null {
+    if (chunk.length !== 54) return null
+    if (chunk.readUInt16BE(0) !== 0x9900) return null
+    const key = chunk.subarray(2, 34)
+    const matedata_track = chunk.readInt16BE(34)
+    const matedata_index = chunk.readBigInt64BE(36)
+    const chunk_track = chunk.readInt16BE(44)
+    const chunk_index = chunk.readBigInt64BE(46)
+    const start_chunk = <PrivateIndex["start_matedata"]>[matedata_track, matedata_index]
+    const start_matedata = <PrivateIndex["start_chunk"]>[chunk_track, chunk_index]
+    return { key, start_chunk, start_matedata }
+}
+
+/**
+ * 编码器
+ * @param index 索引数据
+ */
+function Encoder(index: PrivateIndex) {
+    let buffer = Buffer.allocUnsafeSlow(54)
+    buffer.writeUInt16BE(0x9900, 0)
+    index.key.copy(buffer, 2)
+    buffer.writeInt16BE(index.start_matedata[0], 34)
+    buffer.writeBigInt64BE(index.start_matedata[1], 36)
+    buffer.writeInt16BE(index.start_chunk[0], 44)
+    buffer.writeBigInt64BE(index.start_chunk[1], 46)
+    return buffer
+}
+
+/**
  * 索引类
  * @class
  */
-export default class {
+export default class extends Queue<Index, boolean> {
     private offsets_cache: Map<number, boolean>
     private options: KernelCompleteOptions
     private cache: Map<string, IndexCache>
@@ -63,11 +94,13 @@ export default class {
      * @constructor
      */
     constructor(options: KernelCompleteOptions) {
-        this.file = new File(join(options.directory, "index"))
-        this.offsets_cache = new Map()
-        this.cache = new Map()
-        this.options = options
+        const { directory } = options
+        super(1)        
         this.file_size = 0
+        this.options = options
+        this.cache = new Map()
+        this.offsets_cache = new Map()
+        this.file = new File(join(directory, "index"))
     }
     
     /**
@@ -76,7 +109,7 @@ export default class {
      */
     private async parse(handle: ParseHandle) {
 for (let i = 0;; i ++) {
-        const offset = i * 66
+        const offset = i * 54
 
         /**
          * 排除掉已经缓存的索引
@@ -91,7 +124,7 @@ for (let i = 0;; i ++) {
          * 如果无法读出，所以没有数据
          * 这时候跳出循环
          */
-        const buf = Buffer.allocUnsafeSlow(66)
+        const buf = Buffer.allocUnsafeSlow(54)
         const size = await this.file.read(buf, offset)
         if (size === 0) {
             break
@@ -132,6 +165,50 @@ await this.parse(({ key, start_matedata, start_chunk }, offset) => {
     }
     
     /**
+     * 设置索引 
+     * @param index 索引
+     * @desc
+     * 查找重复索引依赖内存数据实现，
+     * 如果索引未存在于内存中会直接写入文件尾部，
+     * 此时需要依赖定时碎片整理来合并重复项
+     */
+    private async set_index(index: Index): Promise<boolean> {
+        const key = hash(index.name)
+        const key_hex = key.toString("hex")
+        
+        /**
+         * 如果索引已经存在
+         * 则返回设置失败
+         */
+        if (this.cache.has(key_hex)) {
+            return false
+        }
+
+        /**
+         * 初始化索引信息
+         * 将索引存储到内存缓存
+         */
+        this.offsets_cache.set(this.file_size, true)
+        this.cache.set(key_hex, {
+            start_matedata: index.start_matedata,
+            start_chunk: index.start_chunk,
+            offset: this.file_size,
+            cycle: Date.now(),
+            link: 0
+        })
+
+        /**
+         * 编码索引数据
+         * 追加写入到索引文件中
+         */
+        const packet = Encoder({ ...index, key })
+        await this.file.append(packet)
+        this.file_size += 54
+        
+        return true
+    }
+    
+    /**
      * 初始化
      * @desc 
      * 初始化文件句柄以及文件描述
@@ -140,6 +217,7 @@ await this.parse(({ key, start_matedata, start_chunk }, offset) => {
     public async initialize() {
         await this.file.initialize() 
         this.file_size = (await this.file.stat()).size
+        this.bind(this.set_index.bind(this))
         await this.load_all()
     }
 
@@ -155,12 +233,12 @@ await this.parse(({ key, start_matedata, start_chunk }, offset) => {
          * 检查缓存是否存在
          * 如果存在缓存则更新缓存并返回
          */
-        if (this.cache.has(key_hex)) {
-            let value = this.cache.get(key_hex)!
-            value.cycle = Date.now()
-            value.link += 1
-            return value
-        }
+    if (this.cache.has(key_hex)) {
+        let value = this.cache.get(key_hex)!
+        value.cycle = Date.now()
+        value.link += 1
+        return value
+    }
 
         /**
          * 无限循环
@@ -211,48 +289,20 @@ await this.parse((value, index) => {
             start_chunk: hit!.start_chunk,
         }
     }
-
+    
     /**
-     * 设置索引 
+     * 设置索引
      * @param index 索引
-     * @desc
-     * 查找重复索引依赖内存数据实现，
-     * 如果索引未存在于内存中会直接写入文件尾部，
-     * 此时需要依赖定时碎片整理来合并重复项
      */
-    public async set(index: Index): Promise<boolean> {
-        const key = hash(index.name)
-        const key_hex = key.toString("hex")
-        
-        /**
-         * 如果索引已经存在
-         * 则返回设置失败
-         */
-        if (this.cache.has(key_hex)) {
-            return false
-        }
-
-        /**
-         * 初始化索引信息
-         * 将索引存储到内存缓存
-         */
-        this.offsets_cache.set(this.file_size, true)
-        this.cache.set(key_hex, {
-            start_matedata: index.start_matedata,
-            start_chunk: index.start_chunk,
-            offset: this.file_size,
-            cycle: Date.now(),
-            link: 0
-        })
-
-        /**
-         * 编码索引数据
-         * 追加写入到索引文件中
-         */
-        const packet = Encoder({ ...index, key })
-        await this.file.append(packet)
-        this.file_size += 66
-        
-        return true
+    public async set(index: Index) {
+        return await this.call(index)
+    }
+    
+    /**
+     * 删除索引
+     * @param name 名称
+     */
+    public async remove(name: string) {
+        return await this.cache.get(name)
     }
 }

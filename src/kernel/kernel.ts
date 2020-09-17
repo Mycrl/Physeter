@@ -1,6 +1,6 @@
 import { EventEmitter } from "events"
-import { Track } from "./track"
 import { Index } from "./index"
+import { Track } from "./track"
 import { freemem } from "os"
 
 /**
