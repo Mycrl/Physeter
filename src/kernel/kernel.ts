@@ -1,15 +1,6 @@
 import { EventEmitter } from "events"
-import { Index } from "./index"
-import { Track } from "./track"
 import { freemem } from "os"
-
-/**
- * 核心
- */
-export interface Kernel {
-    track_list: Array<Track>    // 轨道列表
-    index_list: Array<Index>    // 索引列表
-}
+import Index from "./index"
 
 /**
  * 核心配置
@@ -34,13 +25,11 @@ export interface KernelCompleteOptions extends KernelOptions {
  * 默认配置处理
  * @param options 外部配置
  */
-function defaultOptions(options: KernelOptions): KernelCompleteOptions {
-    return {
-        directory: options.directory,
-        chunk_size: options.chunk_size || 1024 * 4,                     // 默认为4KB
-        track_size: options.track_size || 1024 * 1024 * 1024 * 50,      // 默认为50G
-        max_memory: options.max_memory || Math.floor(freemem() / 2)     // 默认为系统空闲内存一半
-    }
+function defaultOptions({ directory, ...options }: KernelOptions): KernelCompleteOptions {
+    const max_memory = options.max_memory || Math.floor(freemem() / 2)     // 默认为系统空闲内存一半
+    const track_size = options.track_size || 1024 * 1024 * 1024 * 50      // 默认为50G
+    const chunk_size = options.chunk_size || 1024 * 4                     // 默认为4KB
+    return { directory, max_memory, track_size, chunk_size }
 }
 
 /**
@@ -49,8 +38,7 @@ function defaultOptions(options: KernelOptions): KernelCompleteOptions {
  */
 export default class extends EventEmitter {
     private options: KernelCompleteOptions
-    private track_list: Array<Track>
-    private index_list: Array<Index>
+    private index: Index
 
     /**
      * @param options 配置
@@ -58,9 +46,8 @@ export default class extends EventEmitter {
      */
     constructor(options: KernelOptions) {
         super()
-        this.track_list = []
-        this.index_list = []
         this.options = defaultOptions(options)
+        this.index = new Index(this.options)
     }
 
     /**
@@ -69,7 +56,7 @@ export default class extends EventEmitter {
      * @param name 文件名
      */
     public read(name: string) {
-
+        
     }
 
     /**
@@ -78,7 +65,7 @@ export default class extends EventEmitter {
      * @param name 文件名
      */
     public write(name: string) {
-
+        
     }
 
     /**
@@ -86,6 +73,6 @@ export default class extends EventEmitter {
      * @param name 文件名
      */
     public delete(name: string) {
-
+        
     }
 }

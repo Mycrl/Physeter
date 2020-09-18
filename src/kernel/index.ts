@@ -1,5 +1,5 @@
 import { KernelCompleteOptions } from "./kernel"
-import { hash } from "../lib/util"
+import { hash, Not } from "../lib/util"
 import Queue from "../lib/queue"
 import File from "../lib/fs"
 import { join } from "path"
@@ -67,7 +67,7 @@ function Decoder(chunk: Buffer): PrivateIndex | null {
  * 编码器
  * @param index 索引数据
  */
-function Encoder(index: PrivateIndex) {
+function Encoder(index: PrivateIndex): Buffer {
     let buffer = Buffer.allocUnsafeSlow(54)
     buffer.writeUInt16BE(0x9900, 0)
     index.key.copy(buffer, 2)
@@ -107,7 +107,7 @@ export default class extends Queue<Index, boolean> {
      * 解析索引文件
      * @param handle 处理函数
      */
-    private async parse(handle: ParseHandle) {
+    private async parse(handle: ParseHandle): Promise<Not> {
 for (let i = 0;; i ++) {
         const offset = i * 54
 
@@ -155,7 +155,7 @@ for (let i = 0;; i ++) {
      * 加载索引
      * @desc 将所有索引加载到内存
      */
-    private async load_all() {
+    private async load_all(): Promise<Not> {
 await this.parse(({ key, start_matedata, start_chunk }, offset) => {
         const value = { start_matedata, start_chunk, cycle: Date.now(), link: 0, offset }
         this.cache.set(key.toString("hex"), value)
@@ -214,7 +214,7 @@ await this.parse(({ key, start_matedata, start_chunk }, offset) => {
      * 初始化文件句柄以及文件描述
      * !!! 外部需要强制调用初始化
      */
-    public async initialize() {
+    public async initialize(): Promise<Not> {
         await this.file.initialize() 
         this.file_size = (await this.file.stat()).size
         this.bind(this.set_index.bind(this))
@@ -294,7 +294,7 @@ await this.parse((value, index) => {
      * 设置索引
      * @param index 索引
      */
-    public async set(index: Index) {
+    public async set(index: Index): Promise<boolean> {
         return await this.call(index)
     }
     
@@ -302,7 +302,7 @@ await this.parse((value, index) => {
      * 删除索引
      * @param name 名称
      */
-    public async remove(name: string) {
-        return await this.cache.get(name)
+    public async remove(name: string): Promise<boolean> {
+        return await this.cache.delete(name)
     }
 }

@@ -1,10 +1,11 @@
+import { Not } from "./util"
 import fs from "fs"
 
 /**
  * 创建写入流
  * @param path 路径
  */
-export function createWriteStream(path: string) {
+export function createWriteStream(path: string): fs.WriteStream {
     return fs.createWriteStream(path)
 }
 
@@ -12,7 +13,7 @@ export function createWriteStream(path: string) {
  * 创建读取流
  * @param path 路径
  */
-export function createReadStream(path: string) {
+export function createReadStream(path: string): fs.ReadStream {
     return fs.createReadStream(path)
 }
 
@@ -29,11 +30,21 @@ export function exists(path: string): Promise<boolean> {
 }
 
 /**
+ * 读取目录
+ * @param path 路径
+ */
+export function readdir(path: string): Promise<string[]> {
+    return new Promise((resolve, reject) => fs.readdir(path, (err, files) => {
+        err ? reject(err) : resolve(files)
+    }))
+}
+
+/**
  * 写入文件
  * @param path 路径
  * @param data 数据
  */
-export function writeFile(path: string, data: Buffer | string): Promise<any> {
+export function writeFile(path: string, data: Buffer | string): Promise<Not> {
     return new Promise((resolve, reject) => fs.writeFile(path, data, err => {
         err ? reject(err) : resolve()
     }))
@@ -79,19 +90,16 @@ export function createAndOpen(path: string): Promise<number> {
  * 全部分配
  * @desc 用于完整写入
  */
-async function alloc_all(
-    count_size: number,
-    offset: number,
-    handle: (...argv: number[]) => Promise<number>,
-    buf_offset = 0
-): Promise<any> {
-for (;;) {
-    const position = offset + buf_offset
-    const length = count_size - buf_offset
-    const size = await handle(buf_offset, length, position)
-    if (buf_offset + size >= count_size) break
-    buf_offset += size
-}}
+type Handle = (...argv: number[]) => Promise<number>
+async function alloc_all(count_size: number, offset: number, handle: Handle, buf_offset = 0): Promise<Not> {
+    for (;;) {
+        const position = offset + buf_offset
+        const length = count_size - buf_offset
+        const size = await handle(buf_offset, length, position)
+        if (buf_offset + size >= count_size) break
+        buf_offset += size
+    }
+}
 
 /**
  * 文件类
@@ -114,17 +122,17 @@ export default class {
      * @desc 
      * !!! 外部需要强制调用初始化
      */
-    public async initialize() {
+    public async initialize(): Promise<Not> {
         this.fd = await createAndOpen(this.path)
     }
 
     // 创建写入流
-    public async createWriteStream() {
+    public createWriteStream(): fs.WriteStream {
         return fs.createWriteStream(this.path, { fd: this.fd! })
     }
 
     // 创建读取流
-    public async createReadStream() {
+    public createReadStream(): fs.ReadStream {
         return fs.createReadStream(this.path, { fd: this.fd! })
     }
   
@@ -141,7 +149,7 @@ export default class {
      * 追加数据到文件
      * @param chunk 数据
      */
-    public append(chunk: Buffer) {
+    public append(chunk: Buffer): Promise<Not> {
         return new Promise((resolve, reject) => {
             fs.appendFile(this.path, chunk, err => {
                 err ? reject(err) : resolve()
@@ -154,7 +162,7 @@ export default class {
      * @desc 这个接口会强制完成
      * @param chunk 数据
      */
-    public async write(chunk: Buffer, offset: number) {
+    public async write(chunk: Buffer, offset: number): Promise<Not> {
         await alloc_all(chunk.length, offset, async (buf_offset, length, position) => {
             return await write(this.fd!, chunk, buf_offset, length, position)
         })
@@ -165,7 +173,7 @@ export default class {
      * @desc 这个接口会强制完成
      * @param chunk 数据
      */
-    public async read(chunk: Buffer, offset: number) {
+    public async read(chunk: Buffer, offset: number): Promise<number> {
         return await await read(this.fd!, chunk, 0, chunk.length, offset)
     }
 }

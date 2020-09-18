@@ -1,19 +1,9 @@
-import { Kernel, KernelCompleteOptions } from "./kernel"
-import SuperEvents from "../lib/super_events"
-import { exists } from "../lib/fs"
+import { KernelCompleteOptions } from "./kernel"
+import { Readable, Writable } from "stream"
+import { exists, readdir } from "../lib/fs"
+import { Not } from "../lib/util"
 import { Track } from "./track"
 import { join } from "path"
-
-/**
- * 默认核心数据
- * @param track 初始轨道
- * @desc 轨道列表和索引列表全为空
- */
-async function defaultKernelData(track: Track): Promise<Kernel> {
-    await track.initialize()
-    const track_list = [track]
-    return { track_list, index_list: [] }
-}
 
 /**
  * 存储类
@@ -21,42 +11,95 @@ async function defaultKernelData(track: Track): Promise<Kernel> {
  */
 export default class {
     private options: KernelCompleteOptions
-    private events: SuperEvents<any, any>
+    private tracks: { [key: number]: Track }
 
     /**
      * @param options 核心配置
      * @constructor
      */
     constructor(options: KernelCompleteOptions) {
-        this.events = new SuperEvents()
         this.options = options
-    }
-
-    /**
-     * 默认核心
-     * @desc
-     * 当索引文件不存在时创建默认索引数据，
-     * 同时初始化轨道文件.
-     */
-    private async default_kernel(): Promise<Kernel> {
-        const track = new Track(0, this.events, this.options)
-        return await defaultKernelData(track)
+        this.tracks = {}
     }
 
     /**
      * 初始化
+     *  @desc 
+     * !!! 外部需要强制调用初始化
      */
-    public async initialize() {
+    public async initialize(): Promise<Not> {
         const { directory } = this.options
-        const index_filename = join(directory, "index")
 
         /**
          * 如果索引文件不存在
          * 则返回空索引
          * 并创建初始轨道
          */
-        if (!await exists(index_filename)) {
-            return await this.default_kernel()   
+        if (!await exists(join(directory, "index"))) {
+            this.tracks[0] = new Track(0, this.options)
+            await this.tracks[0].initialize()
         }
+        
+        /**
+         * 读取目录
+         * 查找所有轨道
+         */
+        const tracks = (await readdir(directory))
+            .filter(x => x.endsWith(".track"))
+            .map(x => x.replace(".track", ""))
+            .map(Number)
+            .sort()
+        
+        /**
+         * 初始化所有轨道
+         * 并附加到轨道列表
+         */
+        for (const track_id of tracks) {
+            this.tracks[track_id] = new Track(track_id, this.options)
+            await this.tracks[track_id].initialize()
+        }
+    }
+    
+    /**
+     * 读取数据
+     * @param index 链表头索引
+     */
+    public async read(index: bigint) {
+        
+    }
+}
+
+/**
+ * 可读流
+ * @class
+ */
+class Reader extends Readable {
+    private track: number
+    private index: bigint
+    
+    /**
+     * @param track 初始轨道
+     * @param index 链表头索引
+     * @constructor
+     */
+    constructor(track: number, index: bigint) {
+        super()
+        this.track = track
+        this.index = index
+    }
+    
+    /**
+     * 读取流
+     * @param size 读取长度
+     */
+    async _read(size: number) {
+        
+    }
+    
+    /**
+     * 销毁流
+     */
+    _destroy() {
+        
     }
 }

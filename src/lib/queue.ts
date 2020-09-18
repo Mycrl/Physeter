@@ -1,3 +1,5 @@
+import { Not } from "./util"
+
 /**
  * 任务回调处理
  * @desc 必须为async函数
@@ -37,7 +39,7 @@ export default class<T, U> {
      * 主循环
      * 执行任务队列
      */
-    private async poll() {
+    private async poll(): Promise<Not> {
 
         /**
          * 如果已经工作
@@ -87,7 +89,7 @@ for(;;) {
      * 绑定处理
      * @param handle 处理
      */
-    public bind(handle: Handle<T, U>) {
+    public bind(handle: Handle<T, U>): Not {
         this.handle = handle
     }
     
@@ -95,7 +97,7 @@ for(;;) {
      * 呼叫调用
      * @param task 任务 
      */
-    public call(task: T) {
+    public call(task: T): Promise<U> {
         return new Promise((resolve, reject) => {
             this.queue.unshift({ task, resolve, reject })
             this.poll()

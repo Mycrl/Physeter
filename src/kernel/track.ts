@@ -1,5 +1,5 @@
 import { KernelCompleteOptions } from "./kernel"
-import SuperEvents from "../lib/super_events"
+import { Not } from "../lib/util"
 import File from "../lib/fs"
 import { join } from "path"
 import Chunk from "./chunk"
@@ -10,31 +10,25 @@ import Chunk from "./chunk"
  */
 export class Track {
     private options: KernelCompleteOptions
-    private events: SuperEvents<bigint, any>
     private free_start: number
     private free_end: number
-    private file_size: number
     private chunk: Chunk
     private file: File
     private id: number
+    public size: number
 
     /**
+     * @param id 轨道ID
      * @param options 核心配置
      * @constructor
      */
-    constructor(
-        id: number, 
-        events: SuperEvents<bigint, any>, 
-        options: KernelCompleteOptions
-    ) {
-        const { directory, chunk_size } = options
-        this.file = new File(join(directory, `${id}.track`))
+    constructor(id: number, options: KernelCompleteOptions) {
+        this.file = new File(join(options.directory, `${id}.track`))
         this.chunk = new Chunk(options)
         this.options = options
-        this.events = events
         this.free_start = 0
-        this.file_size = 0
         this.free_end = 0
+        this.size = 0
         this.id = id
     }
     
@@ -43,10 +37,9 @@ export class Track {
      * @desc 
      * !!! 外部需要强制调用初始化
      */
-    public async initialize() {
+    public async initialize(): Promise<Not> {
         await this.file.initialize()
-        this.file_size = (await this.file.stat()).size
-        this.events.on(String(this.id), "remove", this.remove.bind(this))
+        this.size = (await this.file.stat()).size
         await this.read_free_index()
     }
     
@@ -56,18 +49,18 @@ export class Track {
      * 如果不存在就创建0索引
      * 如果存在就读取索引
      */
-    public async read_free_index() {
+    public async read_free_index(): Promise<Not> {
         const free_buf = Buffer.allocUnsafeSlow(16)
         
         /**
          * 链表头部索引还未初始化
          * 填充默认值初始化链表头部
          */
-    if (this.file_size === 0) {
+    if (this.size === 0) {
         free_buf.writeBigInt64BE(0n, 0)
         free_buf.writeBigInt64BE(0n, 8)
         await this.file.write(free_buf, 0)
-        this.file_size = 16
+        this.size = 16
         return undefined
     }
         
@@ -86,7 +79,7 @@ export class Track {
      * 删除数据
      * @param index 头部索引
      */
-    public async remove(index: bigint) {
+    public async remove(index: bigint): Promise<Not | number> {
         const { chunk_size } = this.options
         const free_byte = Buffer.from([0])
 for (let offset = Number(index), i = 0;; i ++) {
@@ -157,12 +150,9 @@ for (let offset = Number(index), i = 0;; i ++) {
         /**
          * 下个索引不在这个轨道文件
          * 转移到其他轨道继续流程
-         * 执行完成后跳出循环
          */
         if (value.next_track !== this.id) {
-            const space = String(value.next_track)
-            await this.events.call(space, "remove", value.next!)
-            break
+            return value.next_track
         }
 }
     }
@@ -185,11 +175,11 @@ for (let offset = Number(index), i = 0;; i ++) {
          * 所以此处检查是否为0
          */
         if (this.free_start == 0) {
-            const next = BigInt(this.file_size + chunk_size)
+            const next = BigInt(this.size + chunk_size)
             const chunk = { next, next_track, data, id }
             const buf = this.chunk.encoder(chunk)
             await this.file.write(buf, this.free_start)
-            this.file_size += chunk_size
+            this.size += chunk_size
             return undefined
         }
 
@@ -206,7 +196,7 @@ for (let offset = Number(index), i = 0;; i ++) {
          * 写入分片
          */
         await this.file.write(this.chunk.encoder({
-            next: value.next || BigInt(this.file_size),
+            next: value.next || BigInt(this.size),
             next_track, data, id
         }), this.free_start)
         
@@ -232,10 +222,18 @@ for (let offset = Number(index), i = 0;; i ++) {
      * 写入结束
      * @desc 将状态转储到磁盘
      */
-    public async write_end() {
+    public async write_end(): Promise<Not> {
         const buf = Buffer.allocUnsafeSlow(16)
         buf.writeBigInt64BE(BigInt(this.free_start), 0)
         buf.writeBigInt64BE(BigInt(this.free_end), 8)
         await this.file.write(buf, 0)
+    }
+    
+    /**
+     * 读取分片
+     * @param index 链表索引头
+     */
+    public async read(index: bigint) {
+        
     }
 }
