@@ -1,8 +1,8 @@
+import ChunkClass, { Chunk, Result, LazyResult } from "./chunk"
 import { KernelCompleteOptions } from "./kernel"
 import { Not } from "../lib/util"
 import File from "../lib/fs"
 import { join } from "path"
-import Chunk from "./chunk"
 
 /**
  * 轨道类
@@ -12,7 +12,7 @@ export class Track {
     private options: KernelCompleteOptions
     private free_start: number
     private free_end: number
-    private chunk: Chunk
+    private chunk: ChunkClass
     private file: File
     private id: number
     public size: number
@@ -24,12 +24,40 @@ export class Track {
      */
     constructor(id: number, options: KernelCompleteOptions) {
         this.file = new File(join(options.directory, `${id}.track`))
-        this.chunk = new Chunk(options)
+        this.chunk = new ChunkClass(options)
         this.options = options
         this.free_start = 0
         this.free_end = 0
         this.size = 0
         this.id = id
+    }
+    
+    /**
+     * 创建默认文件头
+     * @desc 创建默认的失效头尾索引
+     */
+    private async default_header(): Promise<Not> {
+        const free_buf = Buffer.allocUnsafeSlow(16)
+        free_buf.writeBigInt64BE(0n, 0)
+        free_buf.writeBigInt64BE(0n, 8)
+        await this.file.write(free_buf, 0)
+        this.size = 16
+    }
+    
+    /**
+     * 读取失效块索引
+     * @desc
+     * 如果不存在就创建0索引
+     * 如果存在就读取索引
+     */
+    private async read_free(): Promise<Not> {
+        if (this.size === 0) return await this.default_header()
+        const free_buf = Buffer.allocUnsafeSlow(16)
+        await this.file.read(free_buf, 0)
+        const start = free_buf.readBigInt64BE(0)
+        const end = free_buf.readBigInt64BE(8)
+        this.free_start = Number(start)
+        this.free_end = Number(end)
     }
     
     /**
@@ -40,49 +68,17 @@ export class Track {
     public async initialize(): Promise<Not> {
         await this.file.initialize()
         this.size = (await this.file.stat()).size
-        await this.read_free_index()
-    }
-    
-    /**
-     * 读取失效块索引
-     * @desc
-     * 如果不存在就创建0索引
-     * 如果存在就读取索引
-     */
-    public async read_free_index(): Promise<Not> {
-        const free_buf = Buffer.allocUnsafeSlow(16)
-        
-        /**
-         * 链表头部索引还未初始化
-         * 填充默认值初始化链表头部
-         */
-    if (this.size === 0) {
-        free_buf.writeBigInt64BE(0n, 0)
-        free_buf.writeBigInt64BE(0n, 8)
-        await this.file.write(free_buf, 0)
-        this.size = 16
-        return undefined
-    }
-        
-        /**
-         * 已经初始化
-         * 直接读取链表头部索引
-         */
-        await this.file.read(free_buf, 0)
-        const start = free_buf.readBigInt64BE(0)
-        const end = free_buf.readBigInt64BE(8)
-        this.free_start = Number(start)
-        this.free_end = Number(end)
+        await this.read_free()
     }
     
     /**
      * 删除数据
      * @param index 头部索引
      */
-    public async remove(index: bigint): Promise<Not | number> {
+    public async remove(index: number): Promise<Not | LazyResult> {
         const { chunk_size } = this.options
         const free_byte = Buffer.from([0])
-for (let offset = Number(index), i = 0;; i ++) {
+for (let offset = index, i = 0;; i ++) {
 
         /**
          * 遍历完文件
@@ -103,9 +99,10 @@ for (let offset = Number(index), i = 0;; i ++) {
         }
     
         /**
-         * 更改状态位为失效
-         * 解码分片并
+         * 轨道数据长度减去单分片长度
+         * 更改状态位为失效并解码当前分片
          */
+        this.size -= chunk_size
         await this.file.write(free_byte, offset + 4)
         const value = this.chunk.lazy_decoder(chunk)
         
@@ -152,35 +149,26 @@ for (let offset = Number(index), i = 0;; i ++) {
          * 转移到其他轨道继续流程
          */
         if (value.next_track !== this.id) {
-            return value.next_track
+            return value
         }
 }
     }
     
     /**
-     * 写入数据分片
-     * @param next_track 轨道ID
-     * @param id 分片ID
-     * @param data 数据
-     * @desc
-     * 写入接口只开放给写入流
-     * 不考虑全部一次性写入
+     * 分配分片位置
+     * @desc 
+     * 只计算偏移
+     * 并不会实际写入数据
      */
-    public async write(next_track = this.id, id: number, data: Buffer) {
+    public async alloc(): Promise<number> {
         const { chunk_size } = this.options
         
         /**
-         * 检查是否存在失效块
-         * 因为失效块索引不可能为0
-         * 所以此处检查是否为0
+         * 没有失效块
+         * 直接写入尾部
          */
         if (this.free_start == 0) {
-            const next = BigInt(this.size + chunk_size)
-            const chunk = { next, next_track, data, id }
-            const buf = this.chunk.encoder(chunk)
-            await this.file.write(buf, this.free_start)
-            this.size += chunk_size
-            return undefined
+            return this.size
         }
 
         /**
@@ -190,15 +178,7 @@ for (let offset = Number(index), i = 0;; i ++) {
         let free_buf = Buffer.allocUnsafeSlow(chunk_size)
         await this.file.read(free_buf, this.free_start)
         const value = this.chunk.lazy_decoder(free_buf)
-
-        /**
-         * 编码分片
-         * 写入分片
-         */
-        await this.file.write(this.chunk.encoder({
-            next: value.next || BigInt(this.size),
-            next_track, data, id
-        }), this.free_start)
+        
         
         /**
          * 如果还有失效分片
@@ -206,6 +186,7 @@ for (let offset = Number(index), i = 0;; i ++) {
          * 如果失效分片已经全部解决
          * 则归零链表头部
          */
+        const free_start = this.free_start 
         this.free_start = Number(value.next) || 0
     
         /**
@@ -216,24 +197,40 @@ for (let offset = Number(index), i = 0;; i ++) {
         if (this.free_start === 0) {
             this.free_end = 0
         }
+        
+        return free_start
+    }
+    
+    /**
+     * 写入分片
+     * @param chunk 分片
+     * @param index 分片索引
+     */
+    public async write(chunk: Chunk, index: number): Promise<Not> {
+        const packet = this.chunk.encoder(chunk)
+        await this.file.write(packet, index)
     }
     
     /**
      * 写入结束
-     * @desc 将状态转储到磁盘
+     * @desc 
+     * 将状态转储到磁盘
+     * 写入完成之后必须调用
      */
     public async write_end(): Promise<Not> {
-        const buf = Buffer.allocUnsafeSlow(16)
-        buf.writeBigInt64BE(BigInt(this.free_start), 0)
-        buf.writeBigInt64BE(BigInt(this.free_end), 8)
-        await this.file.write(buf, 0)
+        let packet = Buffer.allocUnsafeSlow(16)
+        packet.writeBigInt64BE(BigInt(this.free_start), 0)
+        packet.writeBigInt64BE(BigInt(this.free_end), 8)
+        await this.file.write(packet, 0)
     }
     
     /**
-     * 读取分片
-     * @param index 链表索引头
+     * 读取分片数据
+     * @param index 分片索引
      */
-    public async read(index: bigint) {
-        
+    public async read(index: number): Promise<Result> {
+        let packet = Buffer.allocUnsafeSlow(this.options.chunk_size)
+        await this.file.read(packet, index)
+        return this.chunk.decoder(packet)
     }
 }

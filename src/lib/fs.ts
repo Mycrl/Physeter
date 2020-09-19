@@ -2,22 +2,6 @@ import { Not } from "./util"
 import fs from "fs"
 
 /**
- * 创建写入流
- * @param path 路径
- */
-export function createWriteStream(path: string): fs.WriteStream {
-    return fs.createWriteStream(path)
-}
-
-/**
- * 创建读取流
- * @param path 路径
- */
-export function createReadStream(path: string): fs.ReadStream {
-    return fs.createReadStream(path)
-}
-
-/**
  * 检查路径是否存在
  * @param path 路径
  */
