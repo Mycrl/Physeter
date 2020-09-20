@@ -88,80 +88,80 @@ export class Track extends Queue<TrackTask, Not | number | LazyResult> {
     private async task_remove(index: number): Promise<Not | LazyResult> {
         const { chunk_size } = this.options
         const free_byte = Buffer.from([0])
-for (let offset = index, i = 0;; i ++) {
+        for (let offset = index, i = 0;; i ++) {
 
-        /**
-         * 遍历完文件
-         * 跳出循环
-         */
-        if (offset >= this.options.track_size) {
-            break
-        }
+            /**
+             * 遍历完文件
+             * 跳出循环
+             */
+            if (offset >= this.options.track_size) {
+                break
+            }
 
-        /**
-         * 读取分片
-         * 如果没有数据则跳出
-         */
-        let chunk = Buffer.allocUnsafeSlow(chunk_size)
-        const size = await this.file.read(chunk, offset)
-        if (size === 0) {
-            break
-        }
-    
-        /**
-         * 轨道数据长度减去单分片长度
-         * 更改状态位为失效并解码当前分片
-         */
-        this.size -= chunk_size
-        await this.file.write(free_byte, offset + 4)
-        const value = this.chunk.lazy_decoder(chunk)
-        
-        /**
-         * 如果失效索引头未初始化
-         * 则先初始化索引头
-         */
-        if (this.free_start === 0) {
-            const next_buf = Buffer.allocUnsafeSlow(8)
-            next_buf.writeBigInt64BE(BigInt(offset))
-            await this.file.write(next_buf, 0)
-            this.free_start = offset
-        }
-    
-        /**
-         * 如果尾部索引已存在
-         * 则将当前尾部和现在的分片索引连接
-         */
-        if (this.free_end > 0 && i === 0) {
-            const next_buf = Buffer.allocUnsafeSlow(8)
-            next_buf.writeBigInt64BE(BigInt(offset))
-            await this.file.write(next_buf, this.free_end + 7)
-        }
-    
-        /**
-         * 如果下个索引为空
-         * 则表示分片列表已到尾部
-         * 更新失效索引尾部
-         * 跳出循环
-         */
-        if (value.next === undefined) {
-            const end_buf = Buffer.allocUnsafeSlow(8)
-            end_buf.writeBigInt64BE(BigInt(offset))
-            await this.file.write(end_buf, 0)
-            this.free_end = offset
-            break
-        }
-        
-        // 更新索引
-        offset = Number(value.next)
+            /**
+             * 读取分片
+             * 如果没有数据则跳出
+             */
+            let chunk = Buffer.allocUnsafeSlow(chunk_size)
+            const size = await this.file.read(chunk, offset)
+            if (size === 0) {
+                break
+            }
 
-        /**
-         * 下个索引不在这个轨道文件
-         * 转移到其他轨道继续流程
-         */
-        if (value.next_track !== this.id) {
-            return value
+            /**
+             * 轨道数据长度减去单分片长度
+             * 更改状态位为失效并解码当前分片
+             */
+            this.size -= chunk_size
+            await this.file.write(free_byte, offset + 4)
+            const value = this.chunk.lazy_decoder(chunk)
+
+            /**
+             * 如果失效索引头未初始化
+             * 则先初始化索引头
+             */
+            if (this.free_start === 0) {
+                const next_buf = Buffer.allocUnsafeSlow(8)
+                next_buf.writeBigInt64BE(BigInt(offset))
+                await this.file.write(next_buf, 0)
+                this.free_start = offset
+            }
+
+            /**
+             * 如果尾部索引已存在
+             * 则将当前尾部和现在的分片索引连接
+             */
+            if (this.free_end > 0 && i === 0) {
+                const next_buf = Buffer.allocUnsafeSlow(8)
+                next_buf.writeBigInt64BE(BigInt(offset))
+                await this.file.write(next_buf, this.free_end + 7)
+            }
+
+            /**
+             * 如果下个索引为空
+             * 则表示分片列表已到尾部
+             * 更新失效索引尾部
+             * 跳出循环
+             */
+            if (value.next === undefined) {
+                const end_buf = Buffer.allocUnsafeSlow(8)
+                end_buf.writeBigInt64BE(BigInt(offset))
+                await this.file.write(end_buf, 0)
+                this.free_end = offset
+                break
+            }
+
+            // 更新索引
+            offset = Number(value.next)
+
+            /**
+             * 下个索引不在这个轨道文件
+             * 转移到其他轨道继续流程
+             */
+            if (value.next_track !== this.id) {
+                return value
+            }
         }
-}
     }
     
     /**
@@ -178,7 +178,9 @@ for (let offset = index, i = 0;; i ++) {
          * 直接写入尾部
          */
         if (this.free_start == 0) {
-            return this.size
+            const index = this.size
+            this.size += chunk_size
+            return index
         }
 
         /**

@@ -58,8 +58,8 @@ function Decoder(chunk: Buffer): PrivateIndex | null {
     const matedata_index = chunk.readBigInt64BE(36)
     const chunk_track = chunk.readInt16BE(44)
     const chunk_index = chunk.readBigInt64BE(46)
-    const start_chunk = <PrivateIndex["start_matedata"]>[matedata_track, matedata_index]
-    const start_matedata = <PrivateIndex["start_chunk"]>[chunk_track, chunk_index]
+    const start_matedata = <PrivateIndex["start_matedata"]>[matedata_track, matedata_index]
+    const start_chunk = <PrivateIndex["start_chunk"]>[chunk_track, chunk_index]
     return { key, start_chunk, start_matedata }
 }
 
@@ -108,47 +108,47 @@ export default class extends Queue<Index, boolean> {
      * @param handle 处理函数
      */
     private async parse(handle: ParseHandle): Promise<Not> {
-for (let i = 0;; i ++) {
-        const offset = i * 54
+        for (let i = 0;; i ++) {
+            const offset = i * 54
 
-        /**
-         * 排除掉已经缓存的索引
-         * 加快查找速度
-         */
-        if (this.offsets_cache.has(offset)) {
-            continue
-        }
+            /**
+             * 排除掉已经缓存的索引
+             * 加快查找速度
+             */
+            if (this.offsets_cache.has(offset)) {
+                continue
+            }
 
-        /**
-         * 从文件流中读取固定长度分片
-         * 如果无法读出，所以没有数据
-         * 这时候跳出循环
-         */
-        const buf = Buffer.allocUnsafeSlow(54)
-        const size = await this.file.read(buf, offset)
-        if (size === 0) {
-            break
-        }
+            /**
+             * 从文件流中读取固定长度分片
+             * 如果无法读出，所以没有数据
+             * 这时候跳出循环
+             */
+            const buf = Buffer.allocUnsafeSlow(54)
+            const size = await this.file.read(buf, offset)
+            if (size === 0) {
+                break
+            }
 
-        /**
-         * 惰性解码缓冲区
-         * 如果没有解码结果
-         * 则跳转到下个循环
-         */
-        const chunk = buf.subarray(0, size)
-        const value = Decoder(chunk)
-        if (value === null) {
-            continue
-        }
+            /**
+             * 惰性解码缓冲区
+             * 如果没有解码结果
+             * 则跳转到下个循环
+             */
+            const chunk = buf.subarray(0, size)
+            const value = Decoder(chunk)
+            if (value === null) {
+                continue
+            }
 
-        /**
-         * 传递给处理函数
-         * 如果返回true则停止循环
-         */
-        if (handle(value, offset)) {
-            break
+            /**
+             * 传递给处理函数
+             * 如果返回true则停止循环
+             */
+            if (handle(value, offset)) {
+                break
+            }
         }
-}
     }
     
     /**
@@ -156,12 +156,12 @@ for (let i = 0;; i ++) {
      * @desc 将所有索引加载到内存
      */
     private async load_all(): Promise<Not> {
-await this.parse(({ key, start_matedata, start_chunk }, offset) => {
-        const value = { start_matedata, start_chunk, cycle: Date.now(), link: 0, offset }
-        this.cache.set(key.toString("hex"), value)
-        this.offsets_cache.set(offset, true)
-        return false
-})
+        await this.parse(({ key, start_matedata, start_chunk }, offset) => {
+            const value = { start_matedata, start_chunk, cycle: Date.now(), link: 0, offset }
+            this.cache.set(key.toString("hex"), value)
+            this.offsets_cache.set(offset, true)
+            return false
+        })
     }
     
     /**
@@ -233,12 +233,12 @@ await this.parse(({ key, start_matedata, start_chunk }, offset) => {
          * 检查缓存是否存在
          * 如果存在缓存则更新缓存并返回
          */
-    if (this.cache.has(key_hex)) {
-        let value = this.cache.get(key_hex)!
-        value.cycle = Date.now()
-        value.link += 1
-        return value
-    }
+        if (this.cache.has(key_hex)) {
+            let value = this.cache.get(key_hex)!
+            value.cycle = Date.now()
+            value.link += 1
+            return value
+        }
 
         /**
          * 无限循环
@@ -246,22 +246,22 @@ await this.parse(({ key, start_matedata, start_chunk }, offset) => {
          */
         let offset = 0
         let hit: PrivateIndex | null = null
-await this.parse((value, index) => {
-        offset = index
+        await this.parse((value, index) => {
+            offset = index
 
-        /**
-         * 对比HASH
-         * 这里直接对比Buffer
-         * 如果不匹配则跳转下个循环
-         */
-        if (!key.equals(value.key)) {
-            return false
-        }
+            /**
+             * 对比HASH
+             * 这里直接对比Buffer
+             * 如果不匹配则跳转下个循环
+             */
+            if (!key.equals(value.key)) {
+                return false
+            }
 
-        // 命中索引
-        hit = value
-        return true
-})
+            // 命中索引
+            hit = value
+            return true
+        })
 
         /**
          * 如果没有找到索引
@@ -299,10 +299,20 @@ await this.parse((value, index) => {
     }
     
     /**
+     * 索引是否存在
+     * @param name 名称
+     */
+    public has(name: string) {
+        const hex = hash(name).toString("hex")
+        return this.cache.has(hex)
+    }
+    
+    /**
      * 删除索引
      * @param name 名称
      */
-    public async remove(name: string): Promise<boolean> {
-        return await this.cache.delete(name)
+    public remove(name: string) {
+        const hex = hash(name).toString("hex")
+        return this.cache.delete(hex)
     }
 }

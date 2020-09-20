@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "description": "",
     "scripts": {
-        "dev": "tsc && node --inspect ./dist/index.js",
+        "dev": "tsc && node ./dist/index.js",
         "build": "tsc"
     },
     "author": "Mr.Panda <xivistudios@gmail.com> (https://github.com/quasipaa)",

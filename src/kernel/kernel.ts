@@ -1,4 +1,5 @@
 import { EventEmitter } from "events"
+import Storage from "./storage"
 import { freemem } from "os"
 import Index from "./index"
 
@@ -38,6 +39,7 @@ function defaultOptions({ directory, ...options }: KernelOptions): KernelComplet
  */
 export default class extends EventEmitter {
     private options: KernelCompleteOptions
+    private storage: Storage
     private index: Index
 
     /**
@@ -48,6 +50,15 @@ export default class extends EventEmitter {
         super()
         this.options = defaultOptions(options)
         this.index = new Index(this.options)
+        this.storage = new Storage(this.options)
+    }
+
+    /**
+     * 初始化
+     */
+    public async init() {
+        await this.index.initialize()
+        await this.storage.initialize()
     }
 
     /**
@@ -55,8 +66,11 @@ export default class extends EventEmitter {
      * @desc 打开文件读取流
      * @param name 文件名
      */
-    public read(name: string) {
-        
+    public async read(name: string) {
+        if (!this.index.has(name)) return false
+        const result = await this.index.get(name)
+        const [ track, index ] = result!.start_chunk
+        return this.storage.read(track, index)
     }
 
     /**
@@ -65,7 +79,14 @@ export default class extends EventEmitter {
      * @param name 文件名
      */
     public write(name: string) {
-        
+        if (this.index.has(name)) return false
+        return this.storage.write(async (track, index) => {
+            await this.index.set({
+                name,
+                start_chunk: [track, index],
+                start_matedata: [0, 0n]
+            })
+        })
     }
 
     /**
@@ -73,6 +94,6 @@ export default class extends EventEmitter {
      * @param name 文件名
      */
     public delete(name: string) {
-        
+        if (!this.index.has(name)) return false
     }
 }

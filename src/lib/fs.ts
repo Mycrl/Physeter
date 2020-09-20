@@ -75,8 +75,8 @@ export function createAndOpen(path: string): Promise<number> {
  * @desc 用于完整写入
  */
 type Handle = (...argv: number[]) => Promise<number>
-async function alloc_all(count_size: number, offset: number, handle: Handle, buf_offset = 0): Promise<Not> {
-    for (;;) {
+async function alloc_all(count_size: number, offset: number, handle: Handle): Promise<Not> {
+    for (let buf_offset = 0;;) {
         const position = offset + buf_offset
         const length = count_size - buf_offset
         const size = await handle(buf_offset, length, position)

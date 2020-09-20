@@ -53,10 +53,11 @@ export default class {
      * @param chunk 分片
      */
     public encoder(chunk: Chunk): Buffer {
+        const is_full = chunk.data.length === this.diff_size
         let packet = Buffer.alloc(this.options.chunk_size)
         packet.writeInt32BE(chunk.id, 0)
         packet.writeInt8(1, 4)
-        packet.writeInt16BE(this.diff_size ? 0 : chunk.data.length, 5)
+        packet.writeInt16BE(is_full ? 0 : chunk.data.length, 5)
         packet.writeBigInt64BE(chunk.next || 0n, 7)
         packet.writeInt16BE(chunk.next_track || 0, 15)
         chunk.data.copy(packet, 17)
@@ -73,7 +74,7 @@ export default class {
         const size = chunk.readInt16BE(5)
         const _next = chunk.readBigInt64BE(7)
         const _next_track = chunk.readInt16BE(15)
-        const data = chunk.subarray(17, size === 0 ? this.diff_size : size)
+        const data = chunk.subarray(17, 17 + (size === 0 ? this.diff_size : size))
         const exist = _exist === 1
         const next = _next === 0n ? undefined : _next
         const next_track = _next_track === 0 ? undefined : _next_track
