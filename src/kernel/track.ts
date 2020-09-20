@@ -1,14 +1,34 @@
 import ChunkClass, { Chunk, Result, LazyResult } from "./chunk"
 import { KernelCompleteOptions } from "./kernel"
+import Queue from "../lib/queue"
 import { Not } from "../lib/util"
 import File from "../lib/fs"
 import { join } from "path"
 
 /**
+ * 任务类型
+ */
+enum Tasks {
+    Alloc,      // 分配
+    Write,      // 写入
+    WriteEnd,   // 写入结束
+    Remove      // 删除
+}
+
+/**
+ * 分片任务
+ */
+interface TrackTask {
+    type: Tasks     // 类型
+    index?: number  // 索引
+    chunk?: Chunk   // 分片
+}
+
+/**
  * 轨道类
  * @class
  */
-export class Track {
+export class Track extends Queue<TrackTask, Not | number | LazyResult> {
     private options: KernelCompleteOptions
     private free_start: number
     private free_end: number
@@ -23,6 +43,7 @@ export class Track {
      * @constructor
      */
     constructor(id: number, options: KernelCompleteOptions) {
+        super(1)
         this.file = new File(join(options.directory, `${id}.track`))
         this.chunk = new ChunkClass(options)
         this.options = options
@@ -61,21 +82,10 @@ export class Track {
     }
     
     /**
-     * 初始化
-     * @desc 
-     * !!! 外部需要强制调用初始化
-     */
-    public async initialize(): Promise<Not> {
-        await this.file.initialize()
-        this.size = (await this.file.stat()).size
-        await this.read_free()
-    }
-    
-    /**
      * 删除数据
      * @param index 头部索引
      */
-    public async remove(index: number): Promise<Not | LazyResult> {
+    private async task_remove(index: number): Promise<Not | LazyResult> {
         const { chunk_size } = this.options
         const free_byte = Buffer.from([0])
 for (let offset = index, i = 0;; i ++) {
@@ -160,7 +170,7 @@ for (let offset = index, i = 0;; i ++) {
      * 只计算偏移
      * 并不会实际写入数据
      */
-    public async alloc(): Promise<number> {
+    private async task_alloc(): Promise<number> {
         const { chunk_size } = this.options
         
         /**
@@ -206,7 +216,7 @@ for (let offset = index, i = 0;; i ++) {
      * @param chunk 分片
      * @param index 分片索引
      */
-    public async write(chunk: Chunk, index: number): Promise<Not> {
+    private async task_write(chunk: Chunk, index: number): Promise<Not> {
         const packet = this.chunk.encoder(chunk)
         await this.file.write(packet, index)
     }
@@ -217,11 +227,39 @@ for (let offset = index, i = 0;; i ++) {
      * 将状态转储到磁盘
      * 写入完成之后必须调用
      */
-    public async write_end(): Promise<Not> {
+    private async task_write_end(): Promise<Not> {
         let packet = Buffer.allocUnsafeSlow(16)
         packet.writeBigInt64BE(BigInt(this.free_start), 0)
         packet.writeBigInt64BE(BigInt(this.free_end), 8)
         await this.file.write(packet, 0)
+    }
+
+    /**
+     * 绑定任务
+     * @desc 
+     * 因为写入需要原子性
+     * 所以写入任务全部经由任务队列驱动
+     * 同时只能完成单个任务
+     */
+    private bind_task() {
+        this.bind(async task => {
+            if (task.type === Tasks.Alloc) return await this.task_alloc()
+            if (task.type === Tasks.WriteEnd) return await this.task_write_end()
+            if (task.type === Tasks.Remove) return await this.task_remove(task.index!)
+            if (task.type === Tasks.Write) return await this.task_write(task.chunk!, task.index!)
+        })
+    }
+    
+    /**
+     * 初始化
+     * @desc 
+     * !!! 外部需要强制调用初始化
+     */
+    public async initialize(): Promise<Not> {
+        await this.file.initialize()
+        this.size = (await this.file.stat()).size
+        await this.read_free()
+        this.bind_task()
     }
     
     /**
@@ -229,8 +267,56 @@ for (let offset = index, i = 0;; i ++) {
      * @param index 分片索引
      */
     public async read(index: number): Promise<Result> {
-        let packet = Buffer.allocUnsafeSlow(this.options.chunk_size)
+        const { chunk_size } = this.options
+        let packet = Buffer.allocUnsafeSlow(chunk_size)
         await this.file.read(packet, index)
         return this.chunk.decoder(packet)
+    }
+    
+    /**
+     * 删除数据
+     * @param index 头部索引
+     */
+    public async remove(index: number) {
+        return <Not | LazyResult>await this.call({
+            type: Tasks.Remove,
+            index 
+        })
+    }
+    
+    /**
+     * 写入结束
+     * @desc 
+     * 将状态转储到磁盘
+     * 写入完成之后必须调用
+     */
+    public async write_end() {
+        return <Not>await this.call({
+            type: Tasks.WriteEnd
+        })
+    }
+    
+    /**
+     * 写入分片
+     * @param chunk 分片
+     * @param index 分片索引
+     */
+    public async write(chunk: Chunk, index: number) {
+        return <Not>await this.call({
+            type: Tasks.Write,
+            chunk, index
+        })
+    }
+    
+    /**
+     * 分配分片位置
+     * @desc 
+     * 只计算偏移
+     * 并不会实际写入数据
+     */
+    public async alloc() {
+        return <number>await this.call({
+            type: Tasks.Alloc
+        })
     }
 }
