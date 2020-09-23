@@ -63,7 +63,6 @@ impl<'a> Track<'a> {
     /// track.init().await?;
     /// ```
     pub async fn init(&mut self) -> Result<()> {
-        self.size = self.file.stat().await?.len();
         self.read_header().await
     }
 
@@ -289,9 +288,10 @@ impl<'a> Track<'a> {
     /// track.write_end().await?;
     /// ```
     pub async fn write_end(&mut self) -> Result<()> {
-        let mut packet = vec![0u8; 16];
+        let mut packet = vec![0u8; 24];
         packet.put_u64(self.free_start);
         packet.put_u64(self.free_end);
+        packet.put_u64(self.size);
         self.file.write(&packet, 0).await
     }
 
@@ -300,8 +300,12 @@ impl<'a> Track<'a> {
     /// 将默认的失效块头索引和尾部索引写入到磁盘文件,
     /// 并初始化文件长度状态
     async fn default_header(&mut self) -> Result<()> {
-        self.file.write(&vec![0, 8], 0).await?;
-        self.size = 16;
+        let mut buf = vec![0u8; 24];
+        buf.put_u64(0);
+        buf.put_u64(0);
+        buf.put_u64(24);
+        self.file.write(&buf, 0).await?;
+        self.size = 24;
         Ok(())
     }
 
@@ -311,6 +315,7 @@ impl<'a> Track<'a> {
     /// 这是必要的操作，轨道实例化的时候必须要
     /// 从文件中恢复上次的状态
     async fn read_header(&mut self) -> Result<()> {
+
         // 如果文件为空
         // 则直接写入默认头索引
         if self.size == 0 {
@@ -318,13 +323,14 @@ impl<'a> Track<'a> {
         }
 
         // 从文件中读取头部
-        let mut buffer = [0u8; 16];
+        let mut buffer = [0u8; 24];
         self.file.read(&mut buffer, 0).await?;
         let mut packet = Bytes::from(buffer.to_vec());
 
         // 将状态同步到实例内部
         self.free_start = packet.get_u64();
         self.free_end = packet.get_u64();
+        self.size = packet.get_u64();
 
         Ok(())
     }

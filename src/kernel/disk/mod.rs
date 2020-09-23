@@ -4,6 +4,9 @@ mod writer;
 pub use super::{fs::readdir, chunk::Chunk};
 pub use super::{track::Track, KernelOptions};
 use std::collections::HashMap;
+use std::future::Future;
+use reader::Reader;
+use writer::Writer;
 use anyhow::Result;
 
 /// 轨道列表
@@ -75,6 +78,16 @@ impl<'a> Disk<'a> {
 
         Ok(())
     }
+
+    pub fn read(&mut self, track: u16, index: u64) -> Reader {
+        Reader::new(track, index, &mut self.tracks)
+    }
+
+    // pub fn write<'b, R: Future<Output = Result<()>>>(&mut self, end_callback: fn(u16, u64) -> R) -> Writer<'b, R> {
+    //     Writer::new(&mut self.tracks, self.options, end_callback, async |id| {
+    //         self.create_track(id).await
+    //     })
+    // }
 
     /// 创建轨道
     ///
