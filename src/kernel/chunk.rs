@@ -39,6 +39,7 @@ pub struct LazyResult {
 /// 分片内部最大数据长度，分片固定头长度为17，
 /// 所以这里使用分片长度减去17.
 pub struct Codec {
+    chunk_size: usize,
     diff_size: u64,
 }
 
@@ -56,6 +57,7 @@ impl Codec {
     pub fn new(options: Rc<KernelOptions>) -> Self {
         Self {
             diff_size: options.chunk_size - 17,
+            chunk_size: options.chunk_size as usize
         }
     }
 
@@ -108,6 +110,11 @@ impl Codec {
         packet.put_u64(next);
         packet.put_u16(next_track);
         packet.extend_from_slice(&chunk.data);
+
+        if packet.len() < self.chunk_size {
+            packet.resize(self.chunk_size, 0);
+        }
+
         packet.freeze()
     }
 

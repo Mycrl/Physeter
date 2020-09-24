@@ -1,6 +1,6 @@
 mod kernel;
 
-use kernel::{Kernel, KernelOptions, fs};
+use kernel::{Kernel, KernelOptions};
 use std::time::Instant;
 use std::path::Path;
 use anyhow::Result;
@@ -15,30 +15,21 @@ fn main() -> Result<()> {
 
     kernel.open()?;
 
-    let mut file = fs::Fs::new(Path::new("./活着.mp4"))?;
-    let mut offset = 0;
+    let writer = std::fs::File::create("./output.mp4")?;
+    let reader = std::fs::File::open("./末代皇帝.mp4")?;
 
     let start = Instant::now();
-    if let Some(mut writer) = kernel.write("test")? {
-        loop {
-            let mut buffer = [0u8; 2048];
-            let size = file.read(&mut buffer, offset)?;
-    
-            offset += size as u64;
-            writer.write(if size == 0 {
-                None
-            } else {
-                Some(&buffer[0..size])
-            })?;
+    kernel.write("test", reader)?;
+    println!("write cost: {:?} ms", start.elapsed().as_millis());
 
-            if size == 0 {
-                break;
-            }
-        }
-    }
+    let start = Instant::now();
+    kernel.read("test", writer)?;
+    println!("read cost: {:?} ms", start.elapsed().as_millis());
 
-    println!("time cost: {:?} ms", start.elapsed().as_millis());
+    let start = Instant::now();
+    kernel.delete("test")?;
+    println!("delete cost: {:?} ms", start.elapsed().as_millis());
+
     kernel.shutdown()?;
-
     Ok(())
 }

@@ -48,26 +48,21 @@ impl Reader {
     /// let mut reader = Reader::new(0, 16, &mut tracks);
     /// let data = reader.read()?;
     /// ```
-    pub fn read(&mut self) -> Result<Option<Bytes>> {
+    pub fn read(&mut self) -> Result<(Bytes, bool)> {
         let mut tracks = self.tracks.borrow_mut();
         let track = tracks.get_mut(&self.track).unwrap();
         let chunk = track.read(self.index)?;
 
         // 如果链表还未结束
-        // 将下个节点位置保存到内部游标
-        if let Some(next) = chunk.next {
-            self.index = next
+        // 将下个位置保存到内部游标
+        if let (Some(next), Some(track_id)) = (chunk.next, chunk.next_track) {
+            self.track = track_id;
+            self.index = next;
         }
 
-        // 如果链表还未结束
-        // 将下个轨道位置保存到内部游标
-        if let Some(track_id) = chunk.next_track {
-            self.track = track_id
-        }
-
-        Ok(match chunk.next {
-            Some(_) => Some(chunk.data),
-            None => None,
-        })
+        Ok((
+            chunk.data, 
+            chunk.next.is_some()
+        ))
     }
 }

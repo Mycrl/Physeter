@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::fs::{read_dir, Metadata, ReadDir};
+use std::fs::{read_dir, ReadDir};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, SeekFrom, Seek, Write};
 use std::path::Path;
@@ -27,21 +27,6 @@ impl Fs {
             .create(true)
             .open(path)?;
         Ok(Self(file))
-    }
-
-    /// 获取文件信息
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::Fs;
-    /// use std::path::Path;
-    ///
-    /// let fs = Fs::new(Path::new("./a.text"))?;
-    /// let metadata = fs.stat()?;
-    /// ```
-    pub fn stat(&self) -> Result<Metadata> {
-        Ok(self.0.metadata()?)
     }
 
     /// 调整文件大小
@@ -100,6 +85,12 @@ impl Fs {
     pub fn read(&mut self, chunk: &mut [u8], offset: u64) -> Result<usize> {
         self.0.seek(SeekFrom::Start(offset))?;
         Ok(self.0.read(chunk)?)
+    }
+
+    pub fn promise_read(&mut self, chunk: &mut [u8], offset: u64) -> Result<()> {
+        self.0.seek(SeekFrom::Start(offset))?;
+        self.0.read_exact(chunk)?;
+        Ok(())
     }
 }
 

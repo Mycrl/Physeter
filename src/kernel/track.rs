@@ -1,6 +1,6 @@
-use super::chunk::{Chunk, Codec, LazyResult};
 use super::{fs::Fs, KernelOptions};
-use bytes::{Buf, BufMut, Bytes};
+use super::chunk::{Chunk, Codec, LazyResult};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use anyhow::Result;
 use std::rc::Rc;
 
@@ -82,8 +82,8 @@ impl Track {
     /// let chunk = track.read(10)?;
     /// ```
     pub fn read(&mut self, offset: u64) -> Result<Chunk> {
-        let mut packet = vec![0u8; self.options.track_size as usize];
-        self.file.read(&mut packet, offset)?;
+        let mut packet = vec![0u8; self.options.chunk_size as usize];
+        self.file.promise_read(&mut packet, offset)?;
         Ok(self.chunk.decoder(Bytes::from(packet)))
     }
 
@@ -104,6 +104,7 @@ impl Track {
     /// let index = track.alloc()?;
     /// ```
     pub fn alloc(&mut self) -> Result<u64> {
+        
         // 没有失效块
         // 直接写入轨道尾部
         if self.free_start == 0 {
@@ -161,7 +162,7 @@ impl Track {
     pub fn remove(&mut self, index: u64) -> Result<Option<LazyResult>> {
         let mut first = false;
         let mut offset = index;
-        let free_byte = vec![0u8];
+        let free_byte = [0u8];
 
         // 无限循环
         // 直到失效所有分片
@@ -190,7 +191,7 @@ impl Track {
         // 如果失效索引头未初始化
         // 则先初始化索引头
         if self.free_start == 0 {
-            let mut next_buf = vec![0u8; 8];
+            let mut next_buf = BytesMut::new();
             next_buf.put_u64(offset);
             self.file.write(&next_buf, 0)?;
             self.free_start = offset;
@@ -201,7 +202,7 @@ impl Track {
         // 连接的目的是因为失效块是个连续的链表
         // 所以这里将首个失效块跟上个尾部失效块连接
         if self.free_end > 0 && first == false {
-            let mut next_buf = vec![0u8; 8];
+            let mut next_buf = BytesMut::new();
             next_buf.put_u64(offset);
             self.file.write(&next_buf, self.free_end + 7)?;
         }
@@ -210,7 +211,7 @@ impl Track {
         // 则表示分片列表已到尾部
         // 更新失效索引尾部并跳出循环
         if let None = value.next {
-            let mut end_buf = vec![0u8; 8];
+            let mut end_buf = BytesMut::new();
             end_buf.put_u64(offset);
             self.file.write(&end_buf, 8)?;
             self.free_end = offset;
@@ -289,7 +290,7 @@ impl Track {
     /// track.write_end()?;
     /// ```
     pub fn write_end(&mut self) -> Result<()> {
-        let mut packet = vec![0u8; 24];
+        let mut packet = BytesMut::new();
         packet.put_u64(self.free_start);
         packet.put_u64(self.free_end);
         packet.put_u64(self.size);
@@ -301,7 +302,7 @@ impl Track {
     /// 将默认的失效块头索引和尾部索引写入到磁盘文件,
     /// 并初始化文件长度状态
     fn default_header(&mut self) -> Result<()> {
-        let mut buf = vec![0u8; 24];
+        let mut buf = BytesMut::new();
         buf.put_u64(0);
         buf.put_u64(0);
         buf.put_u64(24);

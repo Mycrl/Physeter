@@ -140,6 +140,7 @@ impl Codec {
     /// 将所有索引转储到磁盘文件，
     /// 注意这是必要的操作，应该在实例
     /// 关闭之前调用该方法保存状态
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -176,6 +177,7 @@ impl Codec {
     /// 并写入内部缓存中
     #[rustfmt::skip]
     fn loader(&mut self) -> Result<()> {
+        let mut buffer = [0u8; 2048];
         let mut offset = 0;
         
         // 无限循环
@@ -184,7 +186,6 @@ impl Codec {
     loop {
 
         // 从文件中读取数据分片
-        let mut buffer = [0u8; 2048];
         let size = self.file.read(&mut buffer, offset)?;
         offset += size as u64;
 

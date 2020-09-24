@@ -4,6 +4,12 @@ use super::{KernelOptions, Chunk, Tracks};
 use std::collections::HashSet;
 use std::rc::Rc;
 
+/// 写入回调任务
+pub enum Callback {
+    CreateTrack(u16),
+    FirstIndex(u16, u64)
+}
+
 /// 链表上个节点
 ///
 /// 因为链表的特性导致写入需要延迟，
@@ -31,8 +37,7 @@ pub struct Previous {
 /// `buffer` 内部缓冲区  
 /// `track` 内部轨道索引  
 /// `id` 分片索引
-pub struct Writer<F> 
-where F: FnMut(u16) -> Result<()> + ?Sized {
+pub struct Writer {
     tracks: Tracks,
     options: Rc<KernelOptions>,
     pub first_track: Option<u16>,
@@ -41,13 +46,11 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     previous: Option<Previous>,
     buffer: BytesMut,
     diff_size: u64,
-    callback: Box<F>,
     track: u16,
     id: u32,
 }
 
-impl<F> Writer<F> 
-where F: FnMut(u16) -> Result<()> + ?Sized {
+impl Writer {
     /// 创建写入流
     ///
     /// # Examples
@@ -62,11 +65,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     /// ...
     /// });
     /// ```
-    pub fn new(
-        tracks: Tracks,
-        options: Rc<KernelOptions>,
-        callback: Box<F>,
-    ) -> Self {
+    pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
         Self {
             diff_size: options.chunk_size - 17,
             buffer: BytesMut::new(),
@@ -74,10 +73,9 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
             first_track: None,
             first_index: None,
             previous: None,
-            callback,
+            track: 1,
             options,
             tracks,
-            track: 0,
             id: 0,
         }
     }
@@ -98,7 +96,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     ///
     /// writer.write(&b"hello")?;
     /// ```
-    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<()> {
+    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<Option<Callback>> {
         match chunk {
             Some(data) => self.write_buffer(data, false),
             None => self.done(),
@@ -110,12 +108,14 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     /// 当没有数据写入的时候，
     /// 将会清理写入流内部的状态，
     /// 比如检查未写入的节点以及未处理的数据
-    fn done(&mut self) -> Result<()> {
+    fn done(&mut self) -> Result<Option<Callback>> {
 
         // 检查是否有未处理的数据
         // 如果存在未处理数据则将数据全部写入
         if self.buffer.len() > 0 {
-            self.write_buffer(&[], true)?;
+            if let Some(callback) = self.write_buffer(&[], true)? {
+                return Ok(Some(callback))
+            }
         }
 
         // 检查是否有未处理的节点
@@ -133,13 +133,19 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
             tracks.get_mut(track_id).unwrap().write_end()?;
         }
 
-        Ok(())
+        // 回调写入结束
+        // 将链表头部位置返回给上层
+        if let (Some(track), Some(index)) = (self.first_track, self.first_index) {
+            return Ok(Some(Callback::FirstIndex(track, index)))
+        }
+        
+        Ok(None)
     }
 
     /// 分配写入轨道
     ///
     /// 为内部分配合理的轨道游标
-    fn alloc(&mut self) -> Result<()> {
+    fn alloc(&mut self) -> Result<Option<Callback>> {
         let tracks = self.tracks.borrow();
         
         // 无限循环
@@ -149,8 +155,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         // 检查轨道是否存在
         // 如果轨道不存在通知上级创建轨道
         if !tracks.contains_key(&self.track) {
-            (self.callback)(self.track)?;
-            break;
+            return Ok(Some(Callback::CreateTrack(self.track)));
         }
 
         // 检查轨道大小是否可以写入分片
@@ -164,13 +169,13 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         }
     }
 
-        Ok(())
+        Ok(None)
     }
 
     /// 将数据写入轨道
     ///
     /// 将数据自动分配到有空间写入的轨道上
-    fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<()> {
+    fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<Option<Callback>> {
         self.buffer.extend_from_slice(chunk);
         let diff_size = self.diff_size as usize;
 
@@ -191,8 +196,10 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         }
 
         // 尝试分配轨道
-        self.alloc()?;
-        let mut tracks = self.tracks.borrow_mut();
+        if let Some(callback) = self.alloc()? {
+            return Ok(Some(callback));
+        }
+        
 
         // 为了避免不必要的重复写入
         // 所以这里先检查轨道索引是否存在
@@ -201,6 +208,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         }
 
         // 为当前轨道分配索引
+        let mut tracks = self.tracks.borrow_mut();
         let current_track = tracks.get_mut(&self.track).unwrap();
         let index = current_track.alloc()?;
 
@@ -239,7 +247,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         self.id += 1;
     }
 
-        Ok(())
+        Ok(None)
     }
 }
 
