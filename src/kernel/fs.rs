@@ -1,9 +1,8 @@
 use anyhow::Result;
 use std::fs::{read_dir, Metadata, ReadDir};
-use std::io::SeekFrom;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, SeekFrom, Seek, Write};
 use std::path::Path;
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// 文件
 ///
@@ -19,15 +18,14 @@ impl Fs {
     /// use super::Fs;
     /// use std::path::Path;
     ///
-    /// let fs = Fs::new(Path::new("./a.text")).await?;
+    /// let fs = Fs::new(Path::new("./a.text"))?;
     /// ```
-    pub async fn new(path: &Path) -> Result<Self> {
+    pub fn new(path: &Path) -> Result<Self> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(path)
-            .await?;
+            .open(path)?;
         Ok(Self(file))
     }
 
@@ -39,11 +37,26 @@ impl Fs {
     /// use super::Fs;
     /// use std::path::Path;
     ///
-    /// let fs = Fs::new(Path::new("./a.text")).await?;
-    /// let metadata = fs.stat().await?;
+    /// let fs = Fs::new(Path::new("./a.text"))?;
+    /// let metadata = fs.stat()?;
     /// ```
-    pub async fn stat(&self) -> Result<Metadata> {
-        Ok(self.0.metadata().await?)
+    pub fn stat(&self) -> Result<Metadata> {
+        Ok(self.0.metadata()?)
+    }
+
+    /// 调整文件大小
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::Fs;
+    /// use std::path::Path;
+    ///
+    /// let fs = Fs::new(Path::new("./a.text"))?;
+    /// fs.resize(0)?;
+    /// ```
+    pub fn resize(&mut self, size: u64) -> Result<()> {
+        Ok(self.0.set_len(size)?)
     }
 
     /// 将缓冲区写入文件
@@ -58,13 +71,13 @@ impl Fs {
     /// use std::path::Path;
     /// use bytes::Bytes;
     ///
-    /// let mut fs = Fs::new(Path::new("./a.text")).await?;
-    /// fs.write(&Bytes::from(b"hello"), 0).await?;
+    /// let mut fs = Fs::new(Path::new("./a.text"))?;
+    /// fs.write(&Bytes::from(b"hello"), 0)?;
     /// ```
-    pub async fn write(&mut self, chunk: &[u8], offset: u64) -> Result<()> {
-        self.0.seek(SeekFrom::Start(offset as u64)).await?;
-        self.0.write_all(chunk).await?;
-        self.0.flush().await?;
+    pub fn write(&mut self, chunk: &[u8], offset: u64) -> Result<()> {
+        self.0.seek(SeekFrom::Start(offset))?;
+        self.0.write_all(chunk)?;
+        self.0.flush()?;
         Ok(())
     }
 
@@ -81,21 +94,13 @@ impl Fs {
     /// use bytes::BytesMut;
     ///
     /// let buffer = [0u8; 1024];
-    /// let mut fs = Fs::new(Path::new("./a.text")).await?;
-    /// let size = fs.read(&mut buffer, 0).await?;
+    /// let mut fs = Fs::new(Path::new("./a.text"))?;
+    /// let size = fs.read(&mut buffer, 0)?;
     /// ```
-    pub async fn read(&mut self, chunk: &mut [u8], offset: u64) -> Result<usize> {
-        self.0.seek(SeekFrom::Start(offset as u64)).await?;
-        Ok(self.0.read(chunk).await?)
+    pub fn read(&mut self, chunk: &mut [u8], offset: u64) -> Result<usize> {
+        self.0.seek(SeekFrom::Start(offset))?;
+        Ok(self.0.read(chunk)?)
     }
-}
-
-/// 文件是否存在
-///
-/// 该函数不能用于目录，
-/// 只能用于获取文件是否存在
-pub async fn exists(path: &Path) -> bool {
-    File::open(path).await.is_ok()
 }
 
 /// 读取目录所有条目

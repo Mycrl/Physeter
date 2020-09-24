@@ -1,18 +1,8 @@
 use super::{fs::Fs, KernelOptions};
-use anyhow::Result;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
-
-/// 完整索引
-///
-/// `key` 索引键  
-/// `start_chunk` 头部分片位置  
-/// `start_matedata` 头部媒体数据位置
-struct FullIndex {
-    pub key: String,
-    pub start_chunk: (u16, u64),
-    pub start_matedata: (u16, u64),
-}
+use anyhow::Result;
+use std::rc::Rc;
 
 /// 惰性索引
 ///
@@ -30,18 +20,16 @@ pub struct Index {
 ///
 /// 用于索引的查找删除和插入
 ///
-/// `options` 配置  
 /// `cache` 索引缓存  
 /// `buffer` 解码缓冲区  
 /// `file` 文件类
-pub struct Codec<'a> {
-    options: &'a KernelOptions<'a>,
+pub struct Codec {
     cache: HashMap<String, Index>,
     buffer: BytesMut,
     file: Fs,
 }
 
-impl<'a> Codec<'a> {
+impl Codec {
     /// 创建编解码器
     ///
     /// # Examples
@@ -52,13 +40,12 @@ impl<'a> Codec<'a> {
     /// let options = KernelOptions::default();
     /// let codec = Codec::new(&options);
     /// ```
-    pub async fn new(options: &'a KernelOptions<'_>) -> Result<Codec<'a>> {
+    pub fn new(options: Rc<KernelOptions>) -> Result<Codec> {
         let path = options.directory.join("index");
         Ok(Self {
-            file: Fs::new(path.as_path()).await?,
+            file: Fs::new(path.as_path())?,
             buffer: BytesMut::new(),
             cache: HashMap::new(),
-            options,
         })
     }
 
@@ -74,10 +61,10 @@ impl<'a> Codec<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut codec = Codec::new(&options);
-    /// codec.init().await?;
+    /// codec.init()?;
     /// ```
-    pub async fn init(&mut self) -> Result<()> {
-        Ok(self.loader().await?)
+    pub fn init(&mut self) -> Result<()> {
+        Ok(self.loader()?)
     }
 
     /// 获取索引
@@ -89,7 +76,8 @@ impl<'a> Codec<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let codec = Codec::new(&options);
-    /// codec.init().await?;
+    /// codec.init()?;
+     ///
     /// let index = codec.get("test");
     /// ```
     pub fn get(&self, name: &str) -> Option<&Index> {
@@ -105,7 +93,8 @@ impl<'a> Codec<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let codec = Codec::new(&options);
-    /// codec.init().await?;
+    /// codec.init()?;
+     ///
     /// let is_exist = codec.has("test");
     /// ```
     pub fn has(&self, name: &str) -> bool {
@@ -121,11 +110,64 @@ impl<'a> Codec<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut codec = Codec::new(&options);
-    /// codec.init().await?;
+    /// codec.init()?;
+     ///
     /// let is_remove = codec.remove("test");
     /// ```
     pub fn remove(&mut self, name: &str) -> bool {
         self.cache.remove(name).is_some()
+    }
+
+    /// 插入索引
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::{Codec, KernelOptions};
+    ///
+    /// let options = KernelOptions::default();
+    /// let mut codec = Codec::new(&options);
+    /// codec.init()?;
+    ///
+    /// codec.set("test".to_string(), ...);
+    /// ```
+    pub fn set(&mut self, name: String, index: Index) -> bool {
+        self.cache.insert(name, index).is_some()
+    }
+
+    /// 索引转储
+    ///
+    /// 将所有索引转储到磁盘文件，
+    /// 注意这是必要的操作，应该在实例
+    /// 关闭之前调用该方法保存状态
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::{Codec, KernelOptions};
+    ///
+    /// let options = KernelOptions::default();
+    /// let mut codec = Codec::new(&options);
+    /// codec.init()?;
+    ///
+    /// codec.set("test".to_string(), ...);
+    /// codec.dump()?;
+    /// ```
+    pub fn dump(&mut self) -> Result<()> {
+        let mut offset = 0;
+
+        // 避免数据位冲突或者无法回收磁盘空间
+        // 再落盘之前先重置为空文件
+        self.file.resize(0)?;
+
+        // 遍历所有的索引
+        // 编码成缓冲区之后写入磁盘文件
+        for (key, index) in self.cache.iter() {
+            let packet = Self::encoder(key, index);
+            self.file.write(&packet, offset)?;
+            offset += packet.len() as u64;
+        }
+
+        Ok(())
     }
 
     /// 加载索引
@@ -133,7 +175,7 @@ impl<'a> Codec<'a> {
     /// 从磁盘文件中扫描所有索引，
     /// 并写入内部缓存中
     #[rustfmt::skip]
-    async fn loader(&mut self) -> Result<()> {
+    fn loader(&mut self) -> Result<()> {
         let mut offset = 0;
         
         // 无限循环
@@ -143,7 +185,7 @@ impl<'a> Codec<'a> {
 
         // 从文件中读取数据分片
         let mut buffer = [0u8; 2048];
-        let size = self.file.read(&mut buffer, offset).await?;
+        let size = self.file.read(&mut buffer, offset)?;
         offset += size as u64;
 
         // 检查读取长度
@@ -155,11 +197,8 @@ impl<'a> Codec<'a> {
         // 解码内部缓冲区
         // 遍历返回的索引列表
         // 将索引项写入内部缓存
-        for value in self.decoder(&buffer[0..size]) {
-            self.cache.insert(value.key, Index {
-                start_chunk: value.start_chunk,
-                start_matedata: value.start_matedata,
-            });
+        for (key, value) in self.decoder(&buffer[0..size]) {
+            self.cache.insert(key, value);
         }
     }
 
@@ -171,7 +210,7 @@ impl<'a> Codec<'a> {
     /// 将缓冲区分片推入内部缓冲区
     /// 并尝试解码出所有索引
     #[rustfmt::skip]
-    fn decoder(&mut self, chunk: &[u8]) -> Vec<FullIndex> {
+    fn decoder(&mut self, chunk: &[u8]) -> Vec<(String, Index)> {
         self.buffer.extend_from_slice(chunk);
         let mut results = Vec::new();
 
@@ -216,11 +255,10 @@ impl<'a> Codec<'a> {
         let chunk_index = self.buffer.get_u64();
 
         // 将索引推入索引列表
-        results.push(FullIndex {
+        results.push((key, Index {
             start_matedata: (matedata_track, matedata_index),
             start_chunk: (chunk_track, chunk_index),
-            key,
-        })
+        }))
     }
 
         results
@@ -230,10 +268,10 @@ impl<'a> Codec<'a> {
     ///
     /// 将索引编码为缓冲区
     /// 将索引写入磁盘文件时使用
-    fn encoder(index: FullIndex) -> Bytes {
+    fn encoder(key: &str, index: &Index) -> Bytes {
         let mut packet = BytesMut::new();
-        packet.put_u16((index.key.len() + 22) as u16);
-        packet.put_slice(index.key.as_bytes());
+        packet.put_u16((key.len() + 22) as u16);
+        packet.put_slice(key.as_bytes());
         packet.put_u16(index.start_matedata.0);
         packet.put_u64(index.start_matedata.1);
         packet.put_u16(index.start_chunk.0);

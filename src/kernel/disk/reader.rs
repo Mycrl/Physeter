@@ -10,13 +10,13 @@ use bytes::Bytes;
 /// `tracks` 轨道列表  
 /// `track` 轨道索引  
 /// `index` 节点索引
-pub struct Reader<'a> {
-    tracks: &'a mut Tracks<'a>,
+pub struct Reader {
+    tracks: Tracks,
     track: u16,
     index: u64,
 }
 
-impl<'a> Reader<'a> {
+impl Reader {
     /// 创建读取流
     ///
     /// # Examples
@@ -28,7 +28,7 @@ impl<'a> Reader<'a> {
     /// let mut tracks = HashMap::new();
     /// let reader = Reader::new(0, 16, &mut tracks);
     /// ```
-    pub fn new(track: u16, index: u64, tracks: &'a mut Tracks<'a>) -> Self {
+    pub fn new(track: u16, index: u64, tracks: Tracks) -> Self {
         Self {
             tracks,
             track,
@@ -46,11 +46,12 @@ impl<'a> Reader<'a> {
     ///
     /// let mut tracks = HashMap::new();
     /// let mut reader = Reader::new(0, 16, &mut tracks);
-    /// let data = reader.read().await?;
+    /// let data = reader.read()?;
     /// ```
-    pub async fn read(&mut self) -> Result<Option<Bytes>> {
-        let track = self.tracks.get_mut(&self.track).unwrap();
-        let chunk = track.read(self.index).await?;
+    pub fn read(&mut self) -> Result<Option<Bytes>> {
+        let mut tracks = self.tracks.borrow_mut();
+        let track = tracks.get_mut(&self.track).unwrap();
+        let chunk = track.read(self.index)?;
 
         // 如果链表还未结束
         // 将下个节点位置保存到内部游标

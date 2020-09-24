@@ -2,6 +2,7 @@ use super::chunk::{Chunk, Codec, LazyResult};
 use super::{fs::Fs, KernelOptions};
 use bytes::{Buf, BufMut, Bytes};
 use anyhow::Result;
+use std::rc::Rc;
 
 /// 存储轨道
 ///
@@ -16,8 +17,8 @@ use anyhow::Result;
 /// `size` 轨道大小  
 /// `file` 文件类  
 /// `id` 轨道ID
-pub struct Track<'a> {
-    options: &'a KernelOptions<'a>,
+pub struct Track {
+    options: Rc<KernelOptions>,
     free_start: u64,
     free_end: u64,
     chunk: Codec,
@@ -26,7 +27,7 @@ pub struct Track<'a> {
     id: u16,
 }
 
-impl<'a> Track<'a> {
+impl Track {
     /// 创建轨道
     ///
     /// ```no_run
@@ -35,11 +36,11 @@ impl<'a> Track<'a> {
     /// let options = KernelOptions::default();
     /// let track = Track::new(0, &options);
     /// ```
-    pub async fn new(id: u16, options: &'a KernelOptions<'_>) -> Result<Track<'a>> {
+    pub fn new(id: u16, options: Rc<KernelOptions>) -> Result<Track> {
         let path = options.directory.join(format!("{}.track", id));
         Ok(Self {
-            file: Fs::new(path.as_path()).await?,
-            chunk: Codec::new(options),
+            file: Fs::new(path.as_path())?,
+            chunk: Codec::new(options.clone()),
             free_start: 0,
             free_end: 0,
             size: 0,
@@ -60,10 +61,10 @@ impl<'a> Track<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// track.init().await?;
+    /// track.init()?;
     /// ```
-    pub async fn init(&mut self) -> Result<()> {
-        self.read_header().await
+    pub fn init(&mut self) -> Result<()> {
+        self.read_header()
     }
 
     /// 读取分片数据
@@ -77,12 +78,12 @@ impl<'a> Track<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// track.init().await?;
-    /// let chunk = track.read(10).await?;
+    /// track.init()?;
+    /// let chunk = track.read(10)?;
     /// ```
-    pub async fn read(&mut self, offset: u64) -> Result<Chunk> {
+    pub fn read(&mut self, offset: u64) -> Result<Chunk> {
         let mut packet = vec![0u8; self.options.track_size as usize];
-        self.file.read(&mut packet, offset).await?;
+        self.file.read(&mut packet, offset)?;
         Ok(self.chunk.decoder(Bytes::from(packet)))
     }
 
@@ -99,10 +100,10 @@ impl<'a> Track<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// track.init().await?;
-    /// let index = track.alloc().await?;
+    /// track.init()?;
+    /// let index = track.alloc()?;
     /// ```
-    pub async fn alloc(&mut self) -> Result<u64> {
+    pub fn alloc(&mut self) -> Result<u64> {
         // 没有失效块
         // 直接写入轨道尾部
         if self.free_start == 0 {
@@ -114,7 +115,7 @@ impl<'a> Track<'a> {
         // 读取失效分片
         // 并解码失效分片
         let mut buffer = vec![0u8; self.options.chunk_size as usize];
-        self.file.read(&mut buffer, self.free_start).await?;
+        self.file.read(&mut buffer, self.free_start)?;
         let value = self.chunk.lazy_decoder(Bytes::from(buffer));
 
         // 如果还有失效分片
@@ -153,11 +154,11 @@ impl<'a> Track<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// track.init().await?;
-    /// let track_id = track.remove(10).await?;
+    /// track.init()?;
+    /// let track_id = track.remove(10)?;
     /// ```
     #[rustfmt::skip]
-    pub async fn remove(&mut self, index: u64) -> Result<Option<LazyResult>> {
+    pub fn remove(&mut self, index: u64) -> Result<Option<LazyResult>> {
         let mut first = false;
         let mut offset = index;
         let free_byte = vec![0u8];
@@ -175,7 +176,7 @@ impl<'a> Track<'a> {
         // 读取分片
         // 如果没有数据则跳出
         let mut chunk = vec![0u8; self.options.chunk_size as usize];
-        let size = self.file.read(&mut chunk[..], offset).await?;
+        let size = self.file.read(&mut chunk[..], offset)?;
         if size == 0 {
             break;
         }
@@ -183,7 +184,7 @@ impl<'a> Track<'a> {
         // 轨道数据长度减去单分片长度
         // 更改状态位为失效并解码当前分片
         self.size -= self.options.chunk_size;
-        self.file.write(&free_byte, offset + 4).await?;
+        self.file.write(&free_byte, offset + 4)?;
         let value = self.chunk.lazy_decoder(Bytes::from(chunk));
 
         // 如果失效索引头未初始化
@@ -191,7 +192,7 @@ impl<'a> Track<'a> {
         if self.free_start == 0 {
             let mut next_buf = vec![0u8; 8];
             next_buf.put_u64(offset);
-            self.file.write(&next_buf, 0).await?;
+            self.file.write(&next_buf, 0)?;
             self.free_start = offset;
         }
 
@@ -202,7 +203,7 @@ impl<'a> Track<'a> {
         if self.free_end > 0 && first == false {
             let mut next_buf = vec![0u8; 8];
             next_buf.put_u64(offset);
-            self.file.write(&next_buf, self.free_end + 7).await?;
+            self.file.write(&next_buf, self.free_end + 7)?;
         }
 
         // 如果下个索引为空
@@ -211,7 +212,7 @@ impl<'a> Track<'a> {
         if let None = value.next {
             let mut end_buf = vec![0u8; 8];
             end_buf.put_u64(offset);
-            self.file.write(&end_buf, 8).await?;
+            self.file.write(&end_buf, 8)?;
             self.free_end = offset;
             break;
         }
@@ -253,11 +254,11 @@ impl<'a> Track<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// track.init().await?;
-    /// track.write(Chunk, 20).await?;
+    /// track.init()?;
+    /// track.write(Chunk, 20)?;
     /// ```
-    pub async fn write(&mut self, chunk: Chunk, index: u64) -> Result<()> {
-        self.file.write(&self.chunk.encoder(chunk), index).await
+    pub fn write(&mut self, chunk: Chunk, index: u64) -> Result<()> {
+        self.file.write(&self.chunk.encoder(chunk), index)
     }
 
     /// 写入结束
@@ -283,28 +284,28 @@ impl<'a> Track<'a> {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// track.init().await?;
-    /// track.write(Chunk, 20).await?;
-    /// track.write_end().await?;
+    /// track.init()?;
+    /// track.write(Chunk, 20)?;
+    /// track.write_end()?;
     /// ```
-    pub async fn write_end(&mut self) -> Result<()> {
+    pub fn write_end(&mut self) -> Result<()> {
         let mut packet = vec![0u8; 24];
         packet.put_u64(self.free_start);
         packet.put_u64(self.free_end);
         packet.put_u64(self.size);
-        self.file.write(&packet, 0).await
+        self.file.write(&packet, 0)
     }
 
     /// 创建默认文件头
     ///
     /// 将默认的失效块头索引和尾部索引写入到磁盘文件,
     /// 并初始化文件长度状态
-    async fn default_header(&mut self) -> Result<()> {
+    fn default_header(&mut self) -> Result<()> {
         let mut buf = vec![0u8; 24];
         buf.put_u64(0);
         buf.put_u64(0);
         buf.put_u64(24);
-        self.file.write(&buf, 0).await?;
+        self.file.write(&buf, 0)?;
         self.size = 24;
         Ok(())
     }
@@ -314,17 +315,17 @@ impl<'a> Track<'a> {
     /// 从磁盘文件中读取失效块头索引和尾部索引，
     /// 这是必要的操作，轨道实例化的时候必须要
     /// 从文件中恢复上次的状态
-    async fn read_header(&mut self) -> Result<()> {
+    fn read_header(&mut self) -> Result<()> {
 
         // 如果文件为空
         // 则直接写入默认头索引
         if self.size == 0 {
-            return self.default_header().await;
+            return self.default_header();
         }
 
         // 从文件中读取头部
         let mut buffer = [0u8; 24];
-        self.file.read(&mut buffer, 0).await?;
+        self.file.read(&mut buffer, 0)?;
         let mut packet = Bytes::from(buffer.to_vec());
 
         // 将状态同步到实例内部

@@ -1,5 +1,6 @@
 use super::KernelOptions;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::rc::Rc;
 
 /// 分片
 ///
@@ -52,7 +53,7 @@ impl Codec {
     /// let options = KernelOptions::default();
     /// Codec::new(&options);
     /// ````
-    pub fn new(options: &KernelOptions<'_>) -> Self {
+    pub fn new(options: Rc<KernelOptions>) -> Self {
         Self {
             diff_size: options.chunk_size - 17,
         }
