@@ -1,5 +1,5 @@
 use super::KernelOptions;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use std::rc::Rc;
 
 /// 分片
@@ -12,22 +12,9 @@ use std::rc::Rc;
 /// `next_track` 下个分片轨道  
 /// `data` 分片数据  
 #[derive(Clone, Debug)]
-pub struct Chunk {
-    pub id: u32,
-    pub exist: bool,
+pub struct Chunk<'a> {
     pub next: Option<u64>,
-    pub next_track: Option<u16>,
-    pub data: Bytes,
-}
-
-/// 惰性返回
-///
-/// `next` 下个分片索引  
-/// `next_track` 下个分片轨道
-#[derive(Copy, Clone, Debug)]
-pub struct LazyResult {
-    pub next: Option<u64>,
-    pub next_track: Option<u16>,
+    pub data: &'a [u8],
 }
 
 /// 分片编解码器
@@ -40,7 +27,7 @@ pub struct LazyResult {
 /// 所以这里使用分片长度减去17.
 pub struct Codec {
     chunk_size: usize,
-    diff_size: u64,
+    diff_size: u16,
 }
 
 impl Codec {
@@ -81,13 +68,8 @@ impl Codec {
     /// let codec = Codec::new(&options);
     /// let packet = codec.encoder(chunk.clone());
     /// ```
-    pub fn encoder(&self, chunk: Chunk) -> Bytes {
+    pub fn encoder(&self, chunk: Chunk) -> &[u8] {
         let mut packet = BytesMut::new();
-
-        let exist = match chunk.exist {
-            true => 1,
-            false => 0,
-        };
 
         let size = match chunk.data.len() == self.diff_size as usize {
             false => chunk.data.len() as u16,
@@ -99,23 +81,15 @@ impl Codec {
             None => 0,
         };
 
-        let next_track = match chunk.next_track {
-            Some(track) => track,
-            None => 0,
-        };
-
-        packet.put_u32(chunk.id);
-        packet.put_u8(exist);
         packet.put_u16(size);
         packet.put_u64(next);
-        packet.put_u16(next_track);
-        packet.extend_from_slice(&chunk.data);
+        packet.put(chunk.data);
 
         if packet.len() < self.chunk_size {
             packet.resize(self.chunk_size, 0);
         }
 
-        packet.freeze()
+        &packet
     }
 
     /// 解码分片
@@ -145,41 +119,23 @@ impl Codec {
     /// assert_eq!(result.next_track, chunk.next_track);
     /// assert_eq!(result.data, chunk.data);
     /// ```
-    pub fn decoder(&self, mut chunk: Bytes) -> Chunk {
-        let id = chunk.get_u32();
-        let source_exist = chunk.get_u8();
+    pub fn decoder<'a>(&self, mut chunk: &'a [u8]) -> Chunk<'a> {
         let source_size = chunk.get_u16();
         let source_next = chunk.get_u64();
-        let source_next_track = chunk.get_u16();
 
         let size = match source_size {
-            0 => self.diff_size as usize,
-            _ => source_size as usize,
-        };
-
-        let exist = match source_exist {
-            1 => true,
-            _ => false,
-        };
+            0 => self.diff_size,
+            _ => source_size,
+        } as usize;
 
         let next = match source_next == 0 {
             false => Some(source_next),
             true => None,
         };
 
-        let next_track = match source_next_track == 0 {
-            false => Some(source_next_track),
-            true => None,
-        };
-
-        let data = chunk.slice(0..size);
-
         Chunk {
-            id,
-            data,
-            exist,
             next,
-            next_track,
+            data: &chunk[0..size]
         }
     }
 
@@ -208,24 +164,13 @@ impl Codec {
     /// assert_eq!(lazy_result.next_track, chunk.next_track);
     /// ```
     #[rustfmt::skip]
-    pub fn lazy_decoder(&self, mut chunk: Bytes) -> LazyResult {
-        chunk.advance(7);
+    pub fn lazy_decoder(&self, mut chunk: &[u8]) -> Option<u64> {
+        chunk.advance(2);
         let source_next = chunk.get_u64();
-        let source_next_track = chunk.get_u16();
 
-        let next = match source_next == 0 {
+        match source_next == 0 {
             false => Some(source_next),
             true => None,
-        };
-
-        let next_track = match source_next_track == 0 {
-            false => Some(source_next_track),
-            true => None,
-        };
-
-        LazyResult { 
-            next, 
-            next_track 
         }
     }
 }

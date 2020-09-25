@@ -1,4 +1,3 @@
-mod chunk;
 mod disk;
 mod index;
 mod track;
@@ -19,7 +18,7 @@ use disk::Disk;
 pub struct KernelOptions {
     pub directory: &'static Path,
     pub track_size: u64,
-    pub chunk_size: u64,
+    pub chunk_size: u16,
     pub max_memory: u64,
 }
 

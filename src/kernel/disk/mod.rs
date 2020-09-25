@@ -1,7 +1,7 @@
 mod reader;
 mod writer;
 
-pub use super::{fs::readdir, chunk::Chunk};
+pub use super::{fs::readdir, track::Chunk};
 pub use super::{track::Track, KernelOptions};
 use std::{cell::RefCell, rc::Rc};
 use std::collections::HashMap;
