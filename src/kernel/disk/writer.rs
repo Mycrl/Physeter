@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 /// 写入回调任务
 pub enum Callback {
+    Index(u64),
     CreateTrack(u16),
     FirstIndex(u16, u64)
 }
@@ -39,7 +40,6 @@ pub struct Previous {
 /// `id` 分片索引
 pub struct Writer {
     tracks: Tracks,
-    options: Rc<KernelOptions>,
     pub first_track: Option<u16>,
     pub first_index: Option<u64>,
     write_tracks: HashSet<u16>,
@@ -61,9 +61,7 @@ impl Writer {
     ///
     /// let mut tracks = HashMap::new();
     /// let options = KernelOptions::default();
-    /// let writer = Writer::new(&mut tracks, options, async |id| {
-    /// ...
-    /// });
+    /// let writer = Writer::new(&mut tracks, options);
     /// ```
     pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
         Self {
@@ -74,7 +72,6 @@ impl Writer {
             first_index: None,
             previous: None,
             track: 1,
-            options,
             tracks,
             id: 0,
         }
@@ -145,8 +142,8 @@ impl Writer {
     /// 分配写入轨道
     ///
     /// 为内部分配合理的轨道游标
-    fn alloc(&mut self) -> Result<Option<Callback>> {
-        let tracks = self.tracks.borrow();
+    fn alloc(&mut self) -> Result<Callback> {
+        let mut tracks = self.tracks.borrow_mut();
         
         // 无限循环
         // 直到匹配出可以写入的轨道
@@ -155,21 +152,19 @@ impl Writer {
         // 检查轨道是否存在
         // 如果轨道不存在通知上级创建轨道
         if !tracks.contains_key(&self.track) {
-            return Ok(Some(Callback::CreateTrack(self.track)));
+            return Ok(Callback::CreateTrack(self.track));
         }
 
         // 检查轨道大小是否可以写入分片
         // 如果可以则跳出，否则递加到下个轨道
-        let track = tracks.get(&self.track).unwrap();
-        if track.size + self.options.chunk_size > self.options.track_size {
+        let track = tracks.get_mut(&self.track).unwrap();
+        if let Some(index) = track.alloc()? {
+            return Ok(Callback::Index(index));
+        } else {
             self.track += 1;
             continue;
-        } else {
-            break;
         }
     }
-
-        Ok(None)
     }
 
     /// 将数据写入轨道
@@ -182,9 +177,9 @@ impl Writer {
         // 无限循环
         // 直到无法继续分配
     loop {
-        let buffer_size = self.buffer.len();
         
         // 缓冲区为空直接跳出
+        let buffer_size = self.buffer.len();
         if buffer_size == 0 {
             break;
         }
@@ -196,21 +191,19 @@ impl Writer {
         }
 
         // 尝试分配轨道
-        if let Some(callback) = self.alloc()? {
-            return Ok(Some(callback));
+        let mut index = 0;
+        let alloc_result = self.alloc()?;
+        if let Callback::Index(offset) = alloc_result {
+            index = offset;
+        } else {
+            return Ok(Some(alloc_result))
         }
         
-
         // 为了避免不必要的重复写入
         // 所以这里先检查轨道索引是否存在
         if !self.write_tracks.contains(&self.track) {
             self.write_tracks.insert(self.track);
         }
-
-        // 为当前轨道分配索引
-        let mut tracks = self.tracks.borrow_mut();
-        let current_track = tracks.get_mut(&self.track).unwrap();
-        let index = current_track.alloc()?;
 
         // 如果没有节点缓存
         // 则为首次写入，记录写入轨道和索引
@@ -222,6 +215,7 @@ impl Writer {
         // 如果存在节点缓存
         // 则将节点缓存写入到轨道中
         if let Some(previous) = self.previous.as_mut() {
+            let mut tracks = self.tracks.borrow_mut();
             let track = tracks.get_mut(&previous.track).unwrap();
             track.write(previous.into_chunk(Some(self.track), Some(index)), previous.index)?;
         }
@@ -229,11 +223,10 @@ impl Writer {
         // 如果缓冲区大小比分配长度小
         // 则使用缓冲区大小，这里考虑一种情况就是存在
         // 尾部清理的时候，是存在不足分片大小的情况
-        let off_index = if buffer_size < diff_size {
-            buffer_size
-        } else {
+        let off_index = std::cmp::min(
+            buffer_size, 
             diff_size
-        };
+        );
 
         // 初始化节点缓存
         self.previous = Some(Previous {

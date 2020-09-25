@@ -20,9 +20,10 @@ use std::rc::Rc;
 pub struct Track {
     options: Rc<KernelOptions>,
     free_start: u64,
+    real_size: u64,
     free_end: u64,
     chunk: Codec,
-    pub size: u64,
+    size: u64,
     file: Fs,
     id: u16,
 }
@@ -42,6 +43,7 @@ impl Track {
             file: Fs::new(path.as_path())?,
             chunk: Codec::new(options.clone()),
             free_start: 0,
+            real_size: 0,
             free_end: 0,
             size: 0,
             options,
@@ -64,6 +66,7 @@ impl Track {
     /// track.init()?;
     /// ```
     pub fn init(&mut self) -> Result<()> {
+        self.real_size = self.file.stat()?.len();
         self.read_header()
     }
 
@@ -103,19 +106,28 @@ impl Track {
     /// track.init()?;
     /// let index = track.alloc()?;
     /// ```
-    pub fn alloc(&mut self) -> Result<u64> {
+    pub fn alloc(&mut self) -> Result<Option<u64>> {
+        let chunk_size = self.options.chunk_size;
+        let track_size = self.options.track_size;
+        let real_size = self.real_size;
+        
+        // 避免写入放大(WAF)
+        // 先写入轨道文件尾部
+        if real_size + chunk_size <= track_size {
+            self.real_size += chunk_size;
+            self.size += chunk_size;
+            return Ok(Some(real_size))
+        }
         
         // 没有失效块
-        // 直接写入轨道尾部
+        // 并且轨道不够写入
         if self.free_start == 0 {
-            let index = self.size;
-            self.size += self.options.chunk_size;
-            return Ok(index);
+            return Ok(None);
         }
 
         // 读取失效分片
         // 并解码失效分片
-        let mut buffer = vec![0u8; self.options.chunk_size as usize];
+        let mut buffer = vec![0u8; chunk_size as usize];
         self.file.read(&mut buffer, self.free_start)?;
         let value = self.chunk.lazy_decoder(Bytes::from(buffer));
 
@@ -136,7 +148,7 @@ impl Track {
             self.free_end = 0
         }
 
-        Ok(free_start)
+        Ok(Some(free_start))
     }
 
     /// 删除数据

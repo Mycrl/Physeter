@@ -136,7 +136,7 @@ impl Disk {
     /// ```
     pub fn write<'a>(&mut self, mut stream: impl Read) -> Result<(u16, u64)> {
         let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
-        let mut buffer = [0; 2048];
+        let mut buffer = vec![0; self.options.chunk_size as usize];
         let mut size = 1;
 
         // 无限循环
@@ -163,7 +163,8 @@ impl Disk {
         if let Some(callback) = writer.write(data)? {
             match callback {
                 Callback::CreateTrack(track) => self.create_track(track)?,
-                Callback::FirstIndex(track, index) => return Ok((track, index))
+                Callback::FirstIndex(track, index) => return Ok((track, index)),
+                _ => ()
             }
         }
     }

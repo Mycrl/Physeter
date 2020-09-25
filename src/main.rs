@@ -8,7 +8,7 @@ use anyhow::Result;
 fn main() -> Result<()> {
     let mut kernel = Kernel::new(KernelOptions {
         directory: Path::new("./data"),
-        track_size: 1024 * 1024 * 1024 * 50,
+        track_size: 1024 * 1024 * 1024 * 5,
         max_memory: 1024 * 1024 * 1024,
         chunk_size: 1024 * 4,
     })?;
