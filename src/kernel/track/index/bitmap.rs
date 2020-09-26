@@ -28,7 +28,24 @@ impl<'a> BitMap<'a> {
         }
     }
 
-    fn read(&self, index: usize) {
-        
+    fn read(&self, index: usize) -> u64 {
+        let node_size = self.node_size as usize;
+        if index + 8 <= node_size as usize {
+            u64::from_be_bytes([
+                self.buffer[index],
+                self.buffer[index + 1],
+                self.buffer[index + 2],
+                self.buffer[index + 3],
+                self.buffer[index + 4],
+                self.buffer[index + 5],
+                self.buffer[index + 6],
+                self.buffer[index + 7]
+            ])
+        } else {
+            let diff_size = node_size - (index + 8);
+            let buf = vec![0u8; diff_size];
+            
+            0
+        }
     }
 }
