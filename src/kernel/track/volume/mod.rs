@@ -1,4 +1,4 @@
-mod codec;
+pub mod codec;
 
 use super::{Fs, KernelOptions};
 use bytes::{BytesMut, BufMut};
@@ -15,7 +15,7 @@ use std::rc::Rc;
 /// `options` 配置  
 /// `free_start` 失效头索引  
 /// `free_end` 失效尾部索引  
-/// `chunk` 分片类  
+/// `codec` 编解码器 
 /// `size` 轨道大小  
 /// `file` 文件类  
 /// `id` 轨道ID
@@ -24,14 +24,14 @@ pub struct Volume {
     free_start: u64,
     real_size: u64,
     free_end: u64,
-    chunk: Codec,
+    codec: Codec,
     size: u64,
     file: Fs,
     id: u16,
 }
 
 impl Volume {
-    /// 创建轨道
+    /// 创建实例
     ///
     /// ```no_run
     /// use super::{Track, KernelOptions};
@@ -40,10 +40,10 @@ impl Volume {
     /// let track = Track::new(0, &options);
     /// ```
     pub fn new(id: u16, options: Rc<KernelOptions>) -> Result<Self> {
-        let path = options.directory.join(format!("{}.track", id));
+        let path = options.directory.join(format!("{}.volume", id));
         let file = Fs::new(path.as_path())?;
         Ok(Self {
-            chunk: Codec::new(options.clone()),
+            codec: Codec::new(options.clone()),
             real_size: file.stat()?.len(),
             free_start: 0,
             free_end: 0,
@@ -70,7 +70,7 @@ impl Volume {
     pub fn read(&mut self, offset: u64) -> Result<Chunk> {
         let mut packet = vec![0u8; self.options.chunk_size as usize];
         self.file.promise_read(&mut packet, offset)?;
-        Ok(self.chunk.decoder(&packet))
+        Ok(self.codec.decoder(&packet))
     }
 
     /// 连续读取
@@ -80,6 +80,11 @@ impl Volume {
     /// 不过并非一定满足给定长度，
     /// 比如没有更多数据的时候
     ///
+    /// TODO:
+    /// 这是一种低级读取方式，用于无法获取
+    /// 索引仅靠内部链表游标前进的情况, 这
+    /// 将可能导致严重的IO性能问题
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -87,9 +92,9 @@ impl Volume {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// let chunk = track.continuous_read(10)?;
+    /// let chunk = track.read_to_lines(10, 100)?;
     /// ```
-    pub fn continuous_read(&mut self, offset: u64, len: u64) -> Result<&[u8]> {
+    pub fn read_to_lines(&mut self, offset: u64, len: u64) -> Result<&[u8]> {
         let mut buffer = BytesMut::new();
         let mut index = offset;
         let mut size = 0;     
@@ -126,13 +131,64 @@ impl Volume {
         }
 
         // 总长度大于限制长度
-        // 跳出
         if size >= len {
             break;
         }
     }
 
         Ok(&buffer)
+    }
+
+    /// 游标推进读取
+    ///
+    /// 按游标推进之后再读取单个分片，
+    /// 用于忽略部分数据之后再读取，
+    ///
+    /// TODO:
+    /// 这是一种低级读取方式，用于无法获取
+    /// 索引仅靠内部链表游标前进的情况, 这
+    /// 将可能导致严重的IO性能问题
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::{Track, KernelOptions};
+    ///
+    /// let options = KernelOptions::default();
+    /// let mut track = Track::new(0, &options);
+    /// let chunk = track.read_to_cursor(10, 10)?;
+    /// ```
+    pub fn read_to_cursor(&mut self, offset: u64, skip: u64) -> Result<Option<Chunk>> {
+        let chunk_size = self.options.chunk_size as usize;
+        let mut index = offset;
+        let mut size = 0;
+
+        // 无限循环
+        // 连续推进
+    loop {
+
+        // 从磁盘中读取单个分片
+        // 将分片内容附加到总长度
+        let chunk = self.read(index)?;
+        size += chunk.data.len() as u64;
+
+        // 检查下个分片游标
+        // 更新内部游标
+        if let Some(next) = chunk.next {
+            index = next;
+        } else {
+            return Ok(None);
+        }
+
+        // 总长度大于限制长度
+        if size >= skip {
+            break;
+        }
+    }
+
+        Ok(Some(
+            self.read(index)?
+        ))
     }
 
     /// 分配分片写入位置
@@ -173,14 +229,14 @@ impl Volume {
         // 并解码失效分片
         let mut buffer = vec![0u8; chunk_size as usize];
         self.file.read(&mut buffer, self.free_start)?;
-        let value = self.chunk.lazy_decoder(&buffer);
+        let value = self.codec.decoder(&buffer);
 
         // 如果还有失效分片
         // 则更新链表头部为下个分片位置
         // 如果失效分片已经全部解决
         // 则归零链表头部
         let free_start = self.free_start;
-        self.free_start = match value {
+        self.free_start = match value.next {
             Some(next) => next,
             None => 0,
         };
@@ -242,6 +298,6 @@ impl Volume {
     /// track.write(Chunk, 20)?;
     /// ```
     pub fn write(&mut self, chunk: Chunk, index: u64) -> Result<()> {
-        self.file.write(&self.chunk.encoder(chunk), index)
+        self.file.write(&self.codec.encoder(chunk), index)
     }
 }

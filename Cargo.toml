@@ -12,6 +12,7 @@ lto = true
 [dependencies]
 bytes = "0.5.4"
 anyhow = "1.0"
+bitmaps = "2.1.0"
 
 [dependencies.tokio]
 version = "0.2"

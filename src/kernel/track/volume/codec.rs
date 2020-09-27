@@ -23,8 +23,8 @@ pub struct Chunk<'a> {
 /// 或者将缓冲区解码为分片.
 ///
 /// #### diff_size
-/// 分片内部最大数据长度，分片固定头长度为17，
-/// 所以这里使用分片长度减去17.
+/// 分片内部最大数据长度，分片固定头长度为8，
+/// 所以这里使用分片长度减去8.
 pub struct Codec {
     chunk_size: usize,
     diff_size: u16,
@@ -43,7 +43,7 @@ impl Codec {
     /// ````
     pub fn new(options: Rc<KernelOptions>) -> Self {
         Self {
-            diff_size: options.chunk_size - 17,
+            diff_size: options.chunk_size - 10,
             chunk_size: options.chunk_size as usize
         }
     }
@@ -136,41 +136,6 @@ impl Codec {
         Chunk {
             next,
             data: &chunk[0..size]
-        }
-    }
-
-    /// 惰性解码
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Chunk, Codec, KernelOptions};
-    /// use bytes::Bytes;
-    ///
-    /// let chunk = Chunk {
-    ///     id: 0,
-    ///     exist: true,
-    ///     next: Some(17),
-    ///     next_track: None,
-    ///     data: Bytes::from_static(b"hello"),
-    /// };
-    ///
-    /// let options = KernelOptions::default();
-    /// let codec = Codec::new(&options);
-    /// let packet = codec.encoder(chunk.clone());
-    /// let lazy_result = codec.lazy_decoder(packet.clone());
-    ///
-    /// assert_eq!(lazy_result.next, chunk.next);
-    /// assert_eq!(lazy_result.next_track, chunk.next_track);
-    /// ```
-    #[rustfmt::skip]
-    pub fn lazy_decoder(&self, mut chunk: &[u8]) -> Option<u64> {
-        chunk.advance(2);
-        let source_next = chunk.get_u64();
-
-        match source_next == 0 {
-            false => Some(source_next),
-            true => None,
         }
     }
 }
