@@ -1,6 +1,6 @@
+mod release;
 mod volume;
 mod index;
-mod free;
 
 pub(crate) use super::fs::Fs;
 pub(crate) use super::KernelOptions;

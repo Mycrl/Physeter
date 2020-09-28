@@ -12,6 +12,7 @@ pub struct Index {
     frees: Vec<u64>,
     volume: Volume,
     codec: Codec,
+    index: u64
 }
 
 impl Index {
@@ -20,11 +21,14 @@ impl Index {
             codec: Codec::new(options),
             cache: HashMap::new(),
             frees: Vec::new(),
+            index: 0,
             volume 
         }
     }
 
     pub fn init(&mut self) -> Result<()> {
+        let chunk = self.volume.free_read(0, 8)?;
+        self.index = chunk.get_u64();
         self.loader()
     }
 
@@ -33,14 +37,13 @@ impl Index {
     }
 
     fn loader(&mut self) -> Result<()> {
-        let chunk = self.volume.read(0)?;
-        let mut index = chunk.data.get_u64();
+        let mut index = self.index;
         let mut size = 0;
 
     loop {
         let chunk = match size == 0 {
             true => Some(self.volume.read(index)?),
-            false => self.volume.read_to_cursor(index, size)?
+            false => self.volume.cursor_read(index, size)?
         };
 
         if let None = chunk {

@@ -73,7 +73,7 @@ impl Volume {
         Ok(self.codec.decoder(&packet))
     }
 
-    /// 连续读取
+    /// 自由读取
     ///
     /// 这不只是读取单个分片，
     /// 而是在内部连续读取并解码分片，
@@ -92,9 +92,9 @@ impl Volume {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// let chunk = track.read_to_lines(10, 100)?;
+    /// let chunk = track.free_read(10, 100)?;
     /// ```
-    pub fn read_to_lines(&mut self, offset: u64, len: u64) -> Result<&[u8]> {
+    pub fn free_read(&mut self, offset: u64, len: u64) -> Result<&[u8]> {
         let mut buffer = BytesMut::new();
         let mut index = offset;
         let mut size = 0;     
@@ -156,9 +156,9 @@ impl Volume {
     ///
     /// let options = KernelOptions::default();
     /// let mut track = Track::new(0, &options);
-    /// let chunk = track.read_to_cursor(10, 10)?;
+    /// let chunk = track.cursor_read(10, 10)?;
     /// ```
-    pub fn read_to_cursor(&mut self, offset: u64, skip: u64) -> Result<Option<Chunk>> {
+    pub fn cursor_read(&mut self, offset: u64, skip: u64) -> Result<Option<Chunk>> {
         let chunk_size = self.options.chunk_size as usize;
         let mut index = offset;
         let mut size = 0;

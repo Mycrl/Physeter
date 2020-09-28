@@ -71,6 +71,9 @@ impl<'a> BitMap<'a> {
         // 解析u64区间
         // 如果缓冲区长度不满足8byte
         // 则只遍历缓冲区区间
+        
+        // TODO: size有问题，没有尾部处理
+        let end_size = size - (index + 1);
         for _ in 0..std::cmp::min(size, 8) {
             index += 1;
             if self.0[index] != 0xFF {
