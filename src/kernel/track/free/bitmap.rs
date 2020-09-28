@@ -4,9 +4,13 @@ use anyhow::Result;
 ///
 /// 直接在缓冲区数组上
 /// 抽象位数组操作
-pub struct BitMap<'a>(&'a [u8]);
+pub struct BitMap<'a>(&'a mut [u8]);
 
 impl<'a> BitMap<'a> {
+    pub fn new(chunk: &'a mut [u8]) -> Self {
+        Self(chunk)
+    }
+
     /// 找到首个零位
     ///
     /// 使用区间查找法，
@@ -38,7 +42,7 @@ impl<'a> BitMap<'a> {
 
         // 如果已经超出缓冲区长度
         // 则表示没有任何匹配
-        if index + 8 >= self.0.len() {
+        if index + 8 > self.0.len() {
             return None
         }
 
@@ -56,7 +60,7 @@ impl<'a> BitMap<'a> {
 
         // 检查是否全为高位
         // 如果不是则跳出
-        if index == 0xFFFFFFFFFFFFFFFF {
+        if u64_slice == 0xFFFFFFFFFFFFFFFF {
             index += 8;
         } else {
             break;
@@ -67,8 +71,8 @@ impl<'a> BitMap<'a> {
         // 解析u64区间
         // 如果缓冲区长度不满足8byte
         // 则只遍历缓冲区区间
-        for i in 0..std::cmp::min(size, 8) {
-            index += i;
+        for _ in 0..std::cmp::min(size, 8) {
+            index += 1;
             if self.0[index] != 0xFF {
                 break;
             }
