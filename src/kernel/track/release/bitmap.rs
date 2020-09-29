@@ -29,15 +29,15 @@ impl<'a> BitMap<'a> {
     ///     0x7F, 0xFF, 0xFF, 0xFF
     /// ]);
     ///
-    /// assert!(Some(32), bitmap.first_zero(64));
+    /// assert!(Some(32), bitmap.first_zero(64, 0));
     /// ```
-    pub fn first_zero(&self, bit_size: usize) -> Option<usize> {
+    pub fn first_zero(&self, bit_size: usize, lo: usize) -> Option<usize> {
         let size = f64::ceil(bit_size as f64 / 8.0) as usize;
-        let mut index = 0;
+        let mut index = lo;
 
         // 缓冲区长度满足读取u64
         // 如果不满足直接进入u8位处理
-        if size >= 8 {
+        if size - index >= 8 {
     loop {
 
         // 如果已经超出缓冲区长度
@@ -71,10 +71,8 @@ impl<'a> BitMap<'a> {
         // 解析u64区间
         // 如果缓冲区长度不满足8byte
         // 则只遍历缓冲区区间
-        
-        // TODO: size有问题，没有尾部处理
         let end_size = size - (index + 1);
-        for _ in 0..std::cmp::min(size, 8) {
+        for _ in 0..std::cmp::min(end_size, 8) {
             index += 1;
             if self.0[index] != 0xFF {
                 break;

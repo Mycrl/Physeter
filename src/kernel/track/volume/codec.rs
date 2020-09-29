@@ -1,5 +1,5 @@
 use super::KernelOptions;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use std::rc::Rc;
 
 /// 分片
@@ -12,9 +12,9 @@ use std::rc::Rc;
 /// `next_track` 下个分片轨道  
 /// `data` 分片数据  
 #[derive(Clone, Debug)]
-pub struct Chunk<'a> {
+pub struct Chunk {
     pub next: Option<u64>,
-    pub data: &'a [u8],
+    pub data: BytesMut,
 }
 
 /// 分片编解码器
@@ -68,7 +68,7 @@ impl Codec {
     /// let codec = Codec::new(&options);
     /// let packet = codec.encoder(chunk.clone());
     /// ```
-    pub fn encoder(&self, chunk: Chunk) -> &[u8] {
+    pub fn encoder(&self, chunk: Chunk) -> BytesMut {
         let mut packet = BytesMut::new();
 
         let size = match chunk.data.len() == self.diff_size as usize {
@@ -89,7 +89,7 @@ impl Codec {
             packet.resize(self.chunk_size, 0);
         }
 
-        &packet
+        packet
     }
 
     /// 解码分片
@@ -119,9 +119,22 @@ impl Codec {
     /// assert_eq!(result.next_track, chunk.next_track);
     /// assert_eq!(result.data, chunk.data);
     /// ```
-    pub fn decoder<'a>(&self, mut chunk: &'a [u8]) -> Chunk<'a> {
-        let source_size = chunk.get_u16();
-        let source_next = chunk.get_u64();
+    pub fn decoder(&self, chunk: Vec<u8>) -> Chunk {
+        let source_size = u16::from_be_bytes([
+            chunk[0],
+            chunk[1]
+        ]);
+
+        let source_next = u64::from_be_bytes([
+            chunk[2],
+            chunk[3],
+            chunk[4],
+            chunk[5],
+            chunk[6],
+            chunk[7],
+            chunk[8],
+            chunk[9]
+        ]);
 
         let size = match source_size {
             0 => self.diff_size,
@@ -133,9 +146,11 @@ impl Codec {
             true => None,
         };
 
+        let data = BytesMut::from(&chunk[9..size]);
+
         Chunk {
             next,
-            data: &chunk[0..size]
+            data
         }
     }
 }

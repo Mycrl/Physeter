@@ -46,7 +46,7 @@ impl Codec {
     /// let mut codec = Codec::new();
     /// let list = codec.decoder(&b"hello");
     /// ```
-    pub fn decoder(&mut self, chunk: &[u8], offset: u64) -> (String, usize, Value) {
+    pub fn decoder(&mut self, chunk: BytesMut, offset: u64) -> (String, usize, Value) {
 
         // 获取索引项总长度
         let size = u32::from_be_bytes([
@@ -96,8 +96,8 @@ impl Codec {
     /// let mut codec = Codec::new();
     /// let buf = codec.encoder(&"hello", vec![0, 10]);
     /// ```
-    pub fn encoder(&self, key: &str, index_list: Vec<u64>) -> &[u8] {
-        let packet = BytesMut::new();
+    pub fn encoder(&self, key: &str, index_list: Vec<u64>) -> BytesMut {
+        let mut packet = BytesMut::new();
 
         // 计算索引项总长度
         let name_size = key.len();
@@ -115,6 +115,6 @@ impl Codec {
             packet.put_u64(index);
         }
 
-        &packet
+        packet
     }
 }

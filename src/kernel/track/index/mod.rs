@@ -27,7 +27,7 @@ impl Index {
     }
 
     pub fn init(&mut self) -> Result<()> {
-        let chunk = self.volume.free_read(0, 8)?;
+        let mut chunk = self.volume.free_read(0, 8)?;
         self.index = chunk.get_u64();
         self.loader()
     }

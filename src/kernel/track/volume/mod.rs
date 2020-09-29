@@ -70,7 +70,7 @@ impl Volume {
     pub fn read(&mut self, offset: u64) -> Result<Chunk> {
         let mut packet = vec![0u8; self.options.chunk_size as usize];
         self.file.promise_read(&mut packet, offset)?;
-        Ok(self.codec.decoder(&packet))
+        Ok(self.codec.decoder(packet))
     }
 
     /// 自由读取
@@ -94,7 +94,7 @@ impl Volume {
     /// let mut track = Track::new(0, &options);
     /// let chunk = track.free_read(10, 100)?;
     /// ```
-    pub fn free_read(&mut self, offset: u64, len: u64) -> Result<&[u8]> {
+    pub fn free_read(&mut self, offset: u64, len: u64) -> Result<BytesMut> {
         let mut buffer = BytesMut::new();
         let mut index = offset;
         let mut size = 0;     
@@ -115,7 +115,7 @@ impl Volume {
             let end_index = chunk.data.len() - diff_size;
             &chunk.data[0..end_index]
         } else {
-            chunk.data
+            &chunk.data
         };
 
         // 将分片数据写入缓冲区
@@ -136,7 +136,7 @@ impl Volume {
         }
     }
 
-        Ok(&buffer)
+        Ok(buffer)
     }
 
     /// 游标推进读取
@@ -159,7 +159,6 @@ impl Volume {
     /// let chunk = track.cursor_read(10, 10)?;
     /// ```
     pub fn cursor_read(&mut self, offset: u64, skip: u64) -> Result<Option<Chunk>> {
-        let chunk_size = self.options.chunk_size as usize;
         let mut index = offset;
         let mut size = 0;
 
@@ -229,7 +228,7 @@ impl Volume {
         // 并解码失效分片
         let mut buffer = vec![0u8; chunk_size as usize];
         self.file.read(&mut buffer, self.free_start)?;
-        let value = self.codec.decoder(&buffer);
+        let value = self.codec.decoder(buffer);
 
         // 如果还有失效分片
         // 则更新链表头部为下个分片位置
