@@ -1,9 +1,8 @@
 mod bitmap;
 
 use super::KernelOptions;
-use super::Volume;
+use super::{Volume, Header};
 use anyhow::Result;
-use bytes::Buf;
 use bitmap::BitMap;
 
 /// 动态释放分区
@@ -12,7 +11,8 @@ pub struct Release {
     diff_size: usize,
     head_size: usize,
     data_size: usize,
-    index: u64
+    index_first: u64,
+    index_end: u64
 }
 
 impl Release {
@@ -22,26 +22,27 @@ impl Release {
         let head_size = diff_size / 8 / 8;
         let data_size = diff_size - head_size;
         Self {
-            index: 0,
+            volume,
             diff_size,
             head_size,
             data_size,
-            volume
+            index_first: 0,
+            index_end: 0
         }
     }
 
     /// 初始化
     pub fn init(&mut self) -> Result<()> {
-        let mut buffer = [0u8; 16];
-        self.volume.file.read(&mut buffer, 8)?;
-        self.index = buffer.get_u64();
+        let header = self.volume.get_header()?;
+        self.index_first = header.release_first;
+        self.index_end = header.release_end;
         Ok(())
     }
 
     /// 分配可写区
     pub fn alloc(&mut self, size: usize) -> Result<Vec<u64>> {
         let mut alloc_map = Vec::new();
-        let mut index = self.index;
+        let mut index = self.index_first;
 
         // 无限循环
         // 遍历失效链表

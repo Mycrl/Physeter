@@ -1,7 +1,8 @@
 pub mod codec;
 
+pub use codec::Header;
 use super::{Fs, KernelOptions};
-use bytes::{BytesMut, BufMut, Buf};
+use bytes::{BytesMut, BufMut};
 use codec::{Chunk, Codec};
 use anyhow::Result;
 use std::rc::Rc;
@@ -55,9 +56,10 @@ impl Volume {
     }
 
     /// 获取分区头
-    pub fn get_header(&mut self) {
+    pub fn get_header(&mut self) -> Result<Header> {
         let mut buffer = [0u8; 32];
-        
+        self.file.promise_read(&mut buffer, 0)?;
+        Ok(self.codec.decoder_header(&buffer))
     }
 
     /// 读取分片数据
@@ -76,7 +78,7 @@ impl Volume {
     pub fn read(&mut self, offset: u64) -> Result<Chunk> {
         let mut packet = vec![0u8; self.options.chunk_size as usize];
         self.file.promise_read(&mut packet, offset)?;
-        Ok(self.codec.decoder(packet))
+        Ok(self.codec.decoder(&packet))
     }
 
     /// 自由读取
@@ -234,7 +236,7 @@ impl Volume {
         // 并解码失效分片
         let mut buffer = vec![0u8; chunk_size as usize];
         self.file.read(&mut buffer, self.free_start)?;
-        let value = self.codec.decoder(buffer);
+        let value = self.codec.decoder(&buffer);
 
         // 如果还有失效分片
         // 则更新链表头部为下个分片位置

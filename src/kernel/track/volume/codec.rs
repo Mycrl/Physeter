@@ -1,6 +1,13 @@
 use super::KernelOptions;
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, BytesMut, Buf};
 use std::rc::Rc;
+
+pub struct Header {
+    pub index_first: u64,
+    pub index_end: u64,
+    pub release_first: u64,
+    pub release_end: u64
+}
 
 /// 分片
 ///
@@ -119,7 +126,7 @@ impl Codec {
     /// assert_eq!(result.next_track, chunk.next_track);
     /// assert_eq!(result.data, chunk.data);
     /// ```
-    pub fn decoder(&self, chunk: Vec<u8>) -> Chunk {
+    pub fn decoder(&self, chunk: &Vec<u8>) -> Chunk {
         let source_size = u16::from_be_bytes([
             chunk[0],
             chunk[1]
@@ -151,6 +158,20 @@ impl Codec {
         Chunk {
             next,
             data
+        }
+    }
+
+    pub fn decoder_header(&self, mut chunk: &[u8]) -> Header {
+        let index_first = chunk.get_u64();
+        let index_end = chunk.get_u64();
+        let release_first = chunk.get_u64();
+        let release_end = chunk.get_u64();
+
+        Header {
+            index_first, 
+            index_end,
+            release_first,
+            release_end
         }
     }
 }
