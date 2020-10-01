@@ -1,7 +1,7 @@
 pub mod codec;
 
 use super::{Fs, KernelOptions};
-use bytes::{BytesMut, BufMut};
+use bytes::{BytesMut, BufMut, Buf};
 use codec::{Chunk, Codec};
 use anyhow::Result;
 use std::rc::Rc;
@@ -26,7 +26,7 @@ pub struct Volume {
     free_end: u64,
     codec: Codec,
     size: u64,
-    file: Fs,
+    pub file: Fs,
     id: u16,
 }
 
@@ -52,6 +52,12 @@ impl Volume {
             file,
             id,
         })
+    }
+
+    /// 获取分区头
+    pub fn get_header(&mut self) {
+        let mut buffer = [0u8; 32];
+        
     }
 
     /// 读取分片数据

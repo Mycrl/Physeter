@@ -4,10 +4,10 @@ use anyhow::Result;
 ///
 /// 直接在缓冲区数组上
 /// 抽象位数组操作
-pub struct BitMap<'a>(&'a mut [u8]);
+pub struct BitMap<'a>(&'a [u8]);
 
 impl<'a> BitMap<'a> {
-    pub fn new(chunk: &'a mut [u8]) -> Self {
+    pub fn new(chunk: &'a [u8]) -> Self {
         Self(chunk)
     }
 
@@ -113,7 +113,7 @@ impl<'a> BitMap<'a> {
     ///     0xFF, 0xFF, 0xFF, 0xFF
     /// ], bitmap);
     /// ```
-    pub fn set(&mut self, offset: usize, flag: bool) -> Result<()> {
+    pub fn set(&mut self, offset: usize, flag: bool) -> Result<(usize, u8)> {
         let index = f64::floor(offset as f64 / 8.0) as usize;
         let pin = if flag { '1' } else { '0' };
         let diff_size = offset % 8;
@@ -145,8 +145,7 @@ impl<'a> BitMap<'a> {
         // 将二进制字符串转为u8
         // 更新缓冲区指定位值
         let prick = u8::from_str_radix(&pad_str, 2)?;
-        self.0[index] = prick;
-        Ok(())
+        Ok((index, prick))
     }
     
     /// 获取比特位

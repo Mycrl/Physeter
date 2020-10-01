@@ -32,8 +32,9 @@ impl Release {
 
     /// 初始化
     pub fn init(&mut self) -> Result<()> {
-        let mut chunk = self.volume.free_read(8, 8)?;
-        self.index = chunk.get_u64();
+        let mut buffer = [0u8; 16];
+        self.volume.file.read(&mut buffer, 8)?;
+        self.index = buffer.get_u64();
         Ok(())
     }
 
@@ -48,8 +49,8 @@ impl Release {
 
         // 获取文件数据
         // 初始化分片分配表
-        let mut chunk = self.volume.read(index)?;
-        let bitmap = BitMap::new(&mut chunk.data);
+        let chunk = self.volume.read(index)?;
+        let bitmap = BitMap::new(&chunk.data);
         let mut offset = 0;
 
         // 无限循环
@@ -73,7 +74,6 @@ impl Release {
             break;
         }
     }
-
         // 检查分配表是否满足
         // 如果已满足则跳出
         if alloc_map.len() >= size {
@@ -90,5 +90,10 @@ impl Release {
     }
 
         Ok(alloc_map)
+    }
+
+    // 释放分片
+    pub fn free(&mut self, index: usize) {
+        
     }
 }
