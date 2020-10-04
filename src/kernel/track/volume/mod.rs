@@ -26,8 +26,8 @@ pub struct Volume {
     real_size: u64,
     free_end: u64,
     codec: Codec,
-    size: u64,
-    pub file: Fs,
+    pub size: u64,
+    file: Fs,
     id: u16,
 }
 
