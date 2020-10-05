@@ -1,7 +1,7 @@
 mod reader;
 mod writer;
 
-pub use super::{fs::readdir, track::Chunk};
+pub use super::{fs::readdir, chunk::Chunk};
 pub use super::{track::Track, KernelOptions};
 use std::{cell::RefCell, rc::Rc};
 use std::collections::HashMap;
@@ -136,7 +136,7 @@ impl Disk {
     /// ```
     pub fn write<'a>(&mut self, mut stream: impl Read) -> Result<(u16, u64)> {
         let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
-        let mut buffer = vec![0; self.options.chunk_size as usize];
+        let mut buffer = [0; 2048];
         let mut size = 1;
 
         // 无限循环

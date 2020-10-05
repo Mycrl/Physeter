@@ -1,4 +1,5 @@
-// mod disk;
+mod chunk;
+mod disk;
 mod index;
 mod track;
 pub mod fs;
@@ -7,7 +8,7 @@ use index::{Codec, Index};
 use std::{path::Path, rc::Rc};
 use std::io::{Read, Write};
 use anyhow::{Result, anyhow};
-// use disk::Disk;
+use disk::Disk;
 
 /// 核心配置
 ///
@@ -18,7 +19,7 @@ use anyhow::{Result, anyhow};
 pub struct KernelOptions {
     pub directory: &'static Path,
     pub track_size: u64,
-    pub chunk_size: u16,
+    pub chunk_size: u64,
     pub max_memory: u64,
 }
 
@@ -28,7 +29,7 @@ pub struct KernelOptions {
 /// `disk` 磁盘类
 pub struct Kernel {
     index: Codec,
-    // disk: Disk
+    disk: Disk
 }
 
 impl Kernel {
@@ -46,7 +47,7 @@ impl Kernel {
         let configure = Rc::new(options);
         Ok(Self {
             index: Codec::new(configure.clone())?,
-            // disk: Disk::new(configure.clone())
+            disk: Disk::new(configure.clone())
         })
     }
 
@@ -64,7 +65,7 @@ impl Kernel {
     /// ```
     pub fn open(&mut self) -> Result<()> {
         self.index.init()?;
-        // self.disk.init()?;
+        self.disk.init()?;
         Ok(())
     }
 
@@ -84,12 +85,11 @@ impl Kernel {
     /// kernel.read("test", file)?;
     /// ```
     pub fn read(&mut self, name: impl ToString, stream: impl Write) -> Result<()> {
-        // match self.index.get(&name.to_string()) {
-        //     Some(Index { start_chunk, .. }) => 
-        //         self.disk.read(stream, start_chunk.0, start_chunk.1),
-        //     _ => Err(anyhow!("not found"))
-        // }
-        Ok(())
+        match self.index.get(&name.to_string()) {
+            Some(Index { start_chunk, .. }) => 
+                self.disk.read(stream, start_chunk.0, start_chunk.1),
+            _ => Err(anyhow!("not found"))
+        }
     }
 
     /// 写入数据
@@ -108,14 +108,14 @@ impl Kernel {
     /// kernel.write("test", file)?;
     /// ```
     pub fn write(&mut self, name: impl ToString, stream: impl Read) -> Result<()> {
-        // if self.index.has(&name.to_string()) {
-        //     return Err(anyhow!("not empty"))
-        // }
+        if self.index.has(&name.to_string()) {
+            return Err(anyhow!("not empty"))
+        }
         
-        // self.index.set(name.to_string(), Index {
-        //     start_chunk: self.disk.write(stream)?,
-        //     start_matedata: (0, 0)
-        // });
+        self.index.set(name.to_string(), Index {
+            start_chunk: self.disk.write(stream)?,
+            start_matedata: (0, 0)
+        });
         
         Ok(())
     }
@@ -135,15 +135,14 @@ impl Kernel {
     /// kernel.delete("test")?;
     /// ```
     pub fn delete(&mut self, name: impl ToString) -> Result<()> {
-        // match self.index.get(&name.to_string()) {
-        //     None => Err(anyhow!("not found")),
-        //     Some(Index { start_chunk, .. }) => {
-        //         self.disk.remove(start_chunk.0, start_chunk.1)?;
-        //         self.index.remove(&name.to_string());
-        //         Ok(())
-        //     }
-        // }
-        Ok(())
+        match self.index.get(&name.to_string()) {
+            None => Err(anyhow!("not found")),
+            Some(Index { start_chunk, .. }) => {
+                self.disk.remove(start_chunk.0, start_chunk.1)?;
+                self.index.remove(&name.to_string());
+                Ok(())
+            }
+        }
     }
 
     /// 关闭实例
