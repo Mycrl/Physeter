@@ -48,6 +48,7 @@ impl Reader {
     /// let mut reader = Reader::new(0, 16, &mut tracks);
     /// let data = reader.read()?;
     /// ```
+    #[rustfmt::skip]
     pub fn read(&mut self) -> Result<(Bytes, bool)> {
         let mut tracks = self.tracks.borrow_mut();
         let track = tracks.get_mut(&self.track).unwrap();

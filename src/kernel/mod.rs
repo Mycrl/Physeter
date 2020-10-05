@@ -4,7 +4,7 @@ mod index;
 mod track;
 pub mod fs;
 
-use index::{Codec, Index};
+use index::Index;
 use std::{path::Path, rc::Rc};
 use std::io::{Read, Write};
 use anyhow::{Result, anyhow};
@@ -28,7 +28,7 @@ pub struct KernelOptions {
 /// `index` 索引类  
 /// `disk` 磁盘类
 pub struct Kernel {
-    index: Codec,
+    index: Index,
     disk: Disk
 }
 
@@ -46,7 +46,7 @@ impl Kernel {
     pub fn new(options: KernelOptions) -> Result<Self> {
         let configure = Rc::new(options);
         Ok(Self {
-            index: Codec::new(configure.clone())?,
+            index: Index::new(&configure)?,
             disk: Disk::new(configure.clone())
         })
     }
@@ -64,7 +64,6 @@ impl Kernel {
     /// kernel.open()?;
     /// ```
     pub fn open(&mut self) -> Result<()> {
-        self.index.init()?;
         self.disk.init()?;
         Ok(())
     }
@@ -85,11 +84,12 @@ impl Kernel {
     /// kernel.read("test", file)?;
     /// ```
     pub fn read(&mut self, name: impl ToString, stream: impl Write) -> Result<()> {
-        match self.index.get(&name.to_string()) {
-            Some(Index { start_chunk, .. }) => 
-                self.disk.read(stream, start_chunk.0, start_chunk.1),
-            _ => Err(anyhow!("not found"))
-        }
+        // match self.index.get(&name.to_string()) {
+        //     Some(Index { start_chunk, .. }) => 
+        //         self.disk.read(stream, start_chunk.0, start_chunk.1),
+        //     _ => Err(anyhow!("not found"))
+        // }
+        Ok(())
     }
 
     /// 写入数据
@@ -108,14 +108,14 @@ impl Kernel {
     /// kernel.write("test", file)?;
     /// ```
     pub fn write(&mut self, name: impl ToString, stream: impl Read) -> Result<()> {
-        if self.index.has(&name.to_string()) {
-            return Err(anyhow!("not empty"))
-        }
+        // if self.index.has(&name.to_string()) {
+        //     return Err(anyhow!("not empty"))
+        // }
         
-        self.index.set(name.to_string(), Index {
-            start_chunk: self.disk.write(stream)?,
-            start_matedata: (0, 0)
-        });
+        // self.index.set(name.to_string(), Index {
+        //     start_chunk: self.disk.write(stream)?,
+        //     start_matedata: (0, 0)
+        // });
         
         Ok(())
     }
@@ -135,35 +135,15 @@ impl Kernel {
     /// kernel.delete("test")?;
     /// ```
     pub fn delete(&mut self, name: impl ToString) -> Result<()> {
-        match self.index.get(&name.to_string()) {
-            None => Err(anyhow!("not found")),
-            Some(Index { start_chunk, .. }) => {
-                self.disk.remove(start_chunk.0, start_chunk.1)?;
-                self.index.remove(&name.to_string());
-                Ok(())
-            }
-        }
-    }
-
-    /// 关闭实例
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Kernel, KernelOptions};
-    ///
-    /// let options = KernelOptions::default();
-    /// let mut kernel = Kernel::new(&options)?;
-    ///
-    /// kernel.open()?;
-    ///
-    /// let file = std::fs::File::open("test.mp4")?;
-    /// kernel.write("test", file)?;
-    ///
-    /// kernel.shutdown("test")?;
-    /// ```
-    pub fn shutdown(&mut self) -> Result<()> {
-        self.index.dump()
+        // match self.index.get(&name.to_string()) {
+        //     None => Err(anyhow!("not found")),
+        //     Some(Index { start_chunk, .. }) => {
+        //         self.disk.remove(start_chunk.0, start_chunk.1)?;
+        //         self.index.remove(&name.to_string());
+        //         Ok(())
+        //     }
+        // }
+        Ok(())
     }
 }
 

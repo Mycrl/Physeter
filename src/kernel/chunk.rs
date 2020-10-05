@@ -13,10 +13,7 @@ use std::rc::Rc;
 /// `data` 分片数据  
 #[derive(Clone, Debug)]
 pub struct Chunk {
-    pub id: u32,
-    pub exist: bool,
     pub next: Option<u64>,
-    pub next_track: Option<u16>,
     pub data: Bytes,
 }
 
@@ -81,6 +78,7 @@ impl Codec {
     /// let codec = Codec::new(&options);
     /// let packet = codec.encoder(chunk.clone());
     /// ```
+    #[rustfmt::skip]
     pub fn encoder(&self, chunk: Chunk) -> Bytes {
         let mut packet = BytesMut::new();
 
@@ -145,6 +143,7 @@ impl Codec {
     /// assert_eq!(result.next_track, chunk.next_track);
     /// assert_eq!(result.data, chunk.data);
     /// ```
+    #[rustfmt::skip]
     pub fn decoder(&self, mut chunk: Bytes) -> Chunk {
         let id = chunk.get_u32();
         let source_exist = chunk.get_u8();

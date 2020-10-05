@@ -1,282 +1,249 @@
-use super::{fs::Fs, KernelOptions};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use super::KernelOptions;
+use std::iter::Iterator;
 use std::collections::HashMap;
+use bytes::{BufMut, BytesMut};
 use anyhow::Result;
-use std::rc::Rc;
+use rocksdb::DB;
 
-/// 惰性索引
+/// 分配表
+pub type AllocMap = HashMap<u16, Vec<u64>>;
+
+/// 惰性分配表
 ///
-/// 用于返回和缓存，
-/// 因为这两项不需要多余的键
+/// 初始化时并不会全部序列化所有索引，
+/// 需要的时候再序列化相对应索引，
+/// 以此降低没有必要的开销
+pub type LazyMap<'a> = HashMap<u16, List<'a>>;
+
+/// 索引列表
 ///
-/// `start_chunk` 头部分片位置  
-/// `start_matedata` 头部媒体数据位置
-pub struct Index {
-    pub start_chunk: (u16, u64),
-    pub start_matedata: (u16, u64),
+/// 索引列表迭代器，
+/// 降低序列化开销
+pub struct List<'a> {
+    buffer: &'a [u8],
+    cursor: usize
 }
 
-/// 索引编解码器
-///
-/// 用于索引的查找删除和插入
-///
-/// `cache` 索引缓存  
-/// `buffer` 解码缓冲区  
-/// `file` 文件类
-pub struct Codec {
-    cache: HashMap<String, Index>,
-    buffer: BytesMut,
-    file: Fs,
+impl<'a> List<'a> {
+    pub fn from(buffer: &'a [u8]) -> Self {
+        Self {
+            cursor: 0,
+            buffer
+        }
+    }
 }
 
-impl Codec {
-    /// 创建编解码器
+/// 索引
+///
+/// 索引构筑在RocksDB上，
+/// 这里抽象出标准接口来
+/// 操作索引存储
+pub struct Index(DB);
+
+impl Index {
+    /// 创建实例
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use super::{Codec, KernelOptions};
+    /// use super::{Index, KernelOptions};
     ///
     /// let options = KernelOptions::default();
-    /// let codec = Codec::new(&options);
+    /// let index = Index::new(&options).unwrap();
     /// ```
-    pub fn new(options: Rc<KernelOptions>) -> Result<Codec> {
-        let path = options.directory.join("index");
-        Ok(Self {
-            file: Fs::new(path.as_path())?,
-            buffer: BytesMut::new(),
-            cache: HashMap::new(),
+    pub fn new(options: &KernelOptions) -> Result<Self> {
+        Ok(Self(DB::open_default(options.directory)?))
+    }
+
+    /// 索引是否存在
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::{Index, KernelOptions};
+    /// use std::collections::HashMap;
+    ///
+    /// let options = KernelOptions::default();
+    /// let mut index = Index::new(&options).unwrap();
+    ///
+    /// let mut alloc_map = HashMap::new();
+    /// alloc_map.insert(1, vec![1, 2, 3]);
+    /// 
+    /// index.set(b"a", &alloc_map).unwrap();
+    /// assert_eq!(index.has(b"a"), true);
+    /// ```
+    pub fn has(&self, key: &[u8]) -> Result<bool> {
+        Ok(self.0.get_pinned(key)?.is_some())
+    }
+
+    /// 索引是否存在
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::{Index, KernelOptions};
+    /// use std::collections::HashMap;
+    ///
+    /// let options = KernelOptions::default();
+    /// let mut index = Index::new(&options).unwrap();
+    ///
+    /// let mut alloc_map = HashMap::new();
+    /// alloc_map.insert(1, vec![1, 2, 3]);
+    /// 
+    /// index.set(b"a", &alloc_map).unwrap();
+    /// assert_eq!(index.has(b"a").unwrap(), true);
+    ///
+    /// index.remove(b"a").unwrap();
+    /// assert_eq!(index.has(b"a").unwrap(), false);
+    /// ```
+    pub fn remove(&mut self, key: &[u8]) -> Result<()> {
+        self.0.delete(key)?;
+        Ok(())
+    }
+
+    /// 索引是否存在
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::{Index, KernelOptions};
+    /// use std::collections::HashMap;
+    ///
+    /// let options = KernelOptions::default();
+    /// let mut index = Index::new(&options).unwrap();
+    ///
+    /// let mut alloc_map = HashMap::new();
+    /// alloc_map.insert(1, vec![1, 2, 3]);
+    /// 
+    /// index.set(b"a", &alloc_map).unwrap();
+    /// 
+    /// if let Some(value) = index.get(b"test").unwrap().get_mut(&1) {
+    ///     assert_eq!(value.next(), Some(1));
+    ///     assert_eq!(value.next(), Some(2));
+    ///     assert_eq!(value.next(), Some(3));
+    ///     assert_eq!(value.next(), None);
+    /// }
+    /// 
+    /// ```
+    #[rustfmt::skip]
+    pub fn get(&self, key: &[u8]) -> Result<Option<LazyMap>> {
+        Ok(match self.0.get_pinned(key)? {
+            Some(x) => Some(decoder(unsafe { 
+                std::mem::transmute(&*x) 
+            })), None => None
         })
     }
 
-    /// 初始化
-    ///
-    /// 必须对该实例调用初始化，
-    /// 才能进行其他操作
+    /// 写入索引项
     ///
     /// # Examples
     ///
     /// ```no_run
-    /// use super::{Codec, KernelOptions};
+    /// use super::{Index, KernelOptions};
+    /// use std::collections::HashMap;
     ///
     /// let options = KernelOptions::default();
-    /// let mut codec = Codec::new(&options);
-    /// codec.init()?;
+    /// let mut index = Index::new(&options).unwrap();
+    ///
+    /// let mut alloc_map = HashMap::new();
+    /// alloc_map.insert(1, vec![1, 2, 3]);
+    /// 
+    /// index.set(b"a", &alloc_map).unwrap();
+    /// assert_eq!(index.has(b"a").unwrap(), true);
     /// ```
-    pub fn init(&mut self) -> Result<()> {
-        Ok(self.loader()?)
-    }
-
-    /// 获取索引
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Codec, KernelOptions};
-    ///
-    /// let options = KernelOptions::default();
-    /// let codec = Codec::new(&options);
-    /// codec.init()?;
-     ///
-    /// let index = codec.get("test");
-    /// ```
-    pub fn get(&self, name: &str) -> Option<&Index> {
-        self.cache.get(name)
-    }
-
-    /// 检查索引是否存在
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Codec, KernelOptions};
-    ///
-    /// let options = KernelOptions::default();
-    /// let codec = Codec::new(&options);
-    /// codec.init()?;
-     ///
-    /// let is_exist = codec.has("test");
-    /// ```
-    pub fn has(&self, name: &str) -> bool {
-        self.cache.contains_key(name)
-    }
-
-    /// 删除索引
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Codec, KernelOptions};
-    ///
-    /// let options = KernelOptions::default();
-    /// let mut codec = Codec::new(&options);
-    /// codec.init()?;
-     ///
-    /// let is_remove = codec.remove("test");
-    /// ```
-    pub fn remove(&mut self, name: &str) -> bool {
-        self.cache.remove(name).is_some()
-    }
-
-    /// 插入索引
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Codec, KernelOptions};
-    ///
-    /// let options = KernelOptions::default();
-    /// let mut codec = Codec::new(&options);
-    /// codec.init()?;
-    ///
-    /// codec.set("test".to_string(), ...);
-    /// ```
-    pub fn set(&mut self, name: String, index: Index) -> bool {
-        self.cache.insert(name, index).is_some()
-    }
-
-    /// 索引转储
-    ///
-    /// 将所有索引转储到磁盘文件，
-    /// 注意这是必要的操作，应该在实例
-    /// 关闭之前调用该方法保存状态
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use super::{Codec, KernelOptions};
-    ///
-    /// let options = KernelOptions::default();
-    /// let mut codec = Codec::new(&options);
-    /// codec.init()?;
-    ///
-    /// codec.set("test".to_string(), ...);
-    /// codec.dump()?;
-    /// ```
-    pub fn dump(&mut self) -> Result<()> {
-        let mut offset = 0;
-
-        // 避免数据位冲突或者无法回收磁盘空间
-        // 再落盘之前先重置为空文件
-        self.file.resize(0)?;
-
-        // 遍历所有的索引
-        // 编码成缓冲区之后写入磁盘文件
-        for (key, index) in self.cache.iter() {
-            let packet = Self::encoder(key, index);
-            self.file.write(&packet, offset)?;
-            offset += packet.len() as u64;
-        }
-
+    pub fn set(&mut self, key: &[u8], value: &AllocMap) -> Result<()> {
+        self.0.put(key, &encoder(value)[..])?;
         Ok(())
     }
+}
 
-    /// 加载索引
-    ///
-    /// 从磁盘文件中扫描所有索引，
-    /// 并写入内部缓存中
+impl<'a> Iterator for List<'a> {
+    type Item = u64;
     #[rustfmt::skip]
-    fn loader(&mut self) -> Result<()> {
-        let mut buffer = [0u8; 2048];
-        let mut offset = 0;
-        
-        // 无限循环
-        // 按固定长度从磁盘中读取数据分片
-        // 推入内部缓冲区解码
-    loop {
-
-        // 从文件中读取数据分片
-        let size = self.file.read(&mut buffer, offset)?;
-        offset += size as u64;
-
-        // 检查读取长度
-        // 如果没有数据则跳出循环
-        if size == 0 {
-            break;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cursor + 8 > self.buffer.len() {
+            return None
         }
 
-        // 解码内部缓冲区
-        // 遍历返回的索引列表
-        // 将索引项写入内部缓存
-        for (key, value) in self.decoder(&buffer[0..size]) {
-            self.cache.insert(key, value);
+        self.cursor += 8;
+        Some(u64::from_be_bytes([
+            self.buffer[self.cursor - 7],
+            self.buffer[self.cursor - 6],
+            self.buffer[self.cursor - 5],
+            self.buffer[self.cursor - 4],
+            self.buffer[self.cursor - 3],
+            self.buffer[self.cursor - 2],
+            self.buffer[self.cursor - 1],
+            self.buffer[self.cursor]
+        ]))
+    }
+}
+
+/// 解码索引
+///
+/// 将索引缓冲区转为
+/// 可迭代的索引列表
+#[rustfmt::skip]
+fn decoder(chunk: &[u8]) -> LazyMap {
+    let count_size = chunk.len();
+    let mut result = HashMap::new();
+    let mut index = 0;
+
+    // 无限循环
+    // 迭代所有轨道
+loop {
+    if index >= count_size {
+        break;
+    }
+
+    // 轨道ID
+    let id = u16::from_be_bytes([
+        chunk[index],
+        chunk[index + 1]
+    ]);
+
+    // 索引列表长度
+    let item_size = u32::from_be_bytes([
+        chunk[index + 2],
+        chunk[index + 3],
+        chunk[index + 4],
+        chunk[index + 5]
+    ]) as usize;
+
+    // 索引列表真实长度
+    // 检查索引列表是否足够解码
+    let size = (item_size * 8) + 6;
+    if index + size > count_size {
+        break;
+    }
+
+    // 获取区间分片
+    // 创建迭代器并推入轨道列表
+    let start_index = index + 6;
+    let end_index = index + size;
+    let chunk_slice = &chunk[start_index..end_index];
+    result.insert(id, List::from(chunk_slice));
+    index += size;
+}
+
+    result
+}
+
+/// 编码索引
+///
+/// 将索引分配表转为
+/// 字节缓冲区
+fn encoder(map: &AllocMap) -> BytesMut {
+    let mut packet = BytesMut::new();
+
+    for (id, value) in map.iter() {
+        packet.put_u16(*id);
+        packet.put_u32(value.len() as u32);
+
+        for index in value {
+            packet.put_u64(*index);
         }
     }
 
-        Ok(())
-    }
-
-    /// 解码缓冲区
-    ///
-    /// 将缓冲区分片推入内部缓冲区
-    /// 并尝试解码出所有索引
-    #[rustfmt::skip]
-    fn decoder(&mut self, chunk: &[u8]) -> Vec<(String, Index)> {
-        self.buffer.extend_from_slice(chunk);
-        let mut results = Vec::new();
-
-        // 无限循环
-        // 直到无法解码
-    loop {
-        
-        // 检查缓冲区长度是否满足最小长度
-        // 如果不满足则跳出循环
-        if self.buffer.len() < 3 {
-            break;
-        }
-
-        // 获取索引数据总长度
-        let size = u16::from_be_bytes([
-            self.buffer[0], 
-            self.buffer[1]
-        ]) as usize;
-
-        // 如果缓冲区内部长度不足
-        // 则跳出循环
-        if size > self.buffer.len() {
-            break;
-        }
-        
-        // 内部游标前进U16
-        self.buffer.advance(2);
-        
-        // 获取key
-        // 先获取长度，然后提取key缓冲区，
-        // 并以不安全的方式转为字符串
-        let key_size = size - 22;
-        let key_buf = self.buffer[0..key_size].to_vec();
-        let key = unsafe { String::from_utf8_unchecked(key_buf) };
-        self.buffer.advance(key_size);
-
-        // 获取媒体数据头部索引
-        // 获取分片头部索引
-        let matedata_track = self.buffer.get_u16();
-        let matedata_index = self.buffer.get_u64();
-        let chunk_track = self.buffer.get_u16();
-        let chunk_index = self.buffer.get_u64();
-
-        // 将索引推入索引列表
-        results.push((key, Index {
-            start_matedata: (matedata_track, matedata_index),
-            start_chunk: (chunk_track, chunk_index),
-        }))
-    }
-
-        results
-    }
-
-    /// 编码索引
-    ///
-    /// 将索引编码为缓冲区
-    /// 将索引写入磁盘文件时使用
-    fn encoder(key: &str, index: &Index) -> Bytes {
-        let mut packet = BytesMut::new();
-        packet.put_u16((key.len() + 22) as u16);
-        packet.put_slice(key.as_bytes());
-        packet.put_u16(index.start_matedata.0);
-        packet.put_u64(index.start_matedata.1);
-        packet.put_u16(index.start_chunk.0);
-        packet.put_u64(index.start_chunk.1);
-        packet.freeze()
-    }
+    packet
 }

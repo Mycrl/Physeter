@@ -142,6 +142,7 @@ impl Fs {
     ///
     /// 通过检查偏移是否为内部游标，
     /// 达到减少系统调用的目的
+    #[rustfmt::skip]
     fn seek(&mut self, offset: u64) -> Result<()> {
         if offset == self.cursor { return Ok(()) }
         self.file.seek(SeekFrom::Start(offset))?;

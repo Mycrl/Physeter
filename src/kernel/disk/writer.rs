@@ -142,6 +142,7 @@ impl Writer {
     /// 分配写入轨道
     ///
     /// 为内部分配合理的轨道游标
+    #[rustfmt::skip]
     fn alloc(&mut self) -> Result<Callback> {
         let mut tracks = self.tracks.borrow_mut();
         
@@ -170,6 +171,7 @@ impl Writer {
     /// 将数据写入轨道
     ///
     /// 将数据自动分配到有空间写入的轨道上
+    #[rustfmt::skip]
     fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<Option<Callback>> {
         self.buffer.extend_from_slice(chunk);
         let diff_size = self.diff_size as usize;
@@ -245,6 +247,7 @@ impl Writer {
 }
 
 impl Previous {
+    #[rustfmt::skip]
     pub fn into_chunk(
         &self, 
         next_track: Option<u16>, 

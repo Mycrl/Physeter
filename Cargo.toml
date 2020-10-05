@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 bytes = "0.5.4"
 anyhow = "1.0"
+rocksdb = "0.15.0"
 
 [dependencies.tokio]
 version = "0.2"

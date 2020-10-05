@@ -30,6 +30,5 @@ fn main() -> Result<()> {
     kernel.delete("test")?;
     println!("delete cost: {:?} ms", start.elapsed().as_millis());
 
-    kernel.shutdown()?;
     Ok(())
 }

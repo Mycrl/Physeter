@@ -56,6 +56,7 @@ impl Disk {
     /// let mut disk = Disk::new(options);
     /// disk.init()?;
     /// ```
+    #[rustfmt::skip]
     pub fn init(&mut self) -> Result<()> {
         let mut track_count: i32 = 0;
 
@@ -97,6 +98,7 @@ impl Disk {
     /// let file = File::open("test.mp4");
     /// disk.read(file, 0, 19)?;
     /// ```
+    #[rustfmt::skip]
     pub fn read(&mut self, mut stream: impl Write, track: u16, index: u64) -> Result<()> {
         let mut reader = Reader::new(track, index, self.tracks.clone());
 
@@ -134,6 +136,7 @@ impl Disk {
     /// let file = File::open("test.mp4");
     /// let (track, index) = disk.write(file)?;
     /// ```
+    #[rustfmt::skip]
     pub fn write<'a>(&mut self, mut stream: impl Read) -> Result<(u16, u64)> {
         let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
         let mut buffer = [0; 2048];
@@ -183,6 +186,7 @@ impl Disk {
     ///
     /// disk.remove(0, 16)?;
     /// ```
+    #[rustfmt::skip]
     pub fn remove(&mut self, track: u16, index: u64) -> Result<()> {
         let mut track_index = index;
         let mut track_id = track;
@@ -210,6 +214,7 @@ impl Disk {
     ///
     /// 创建轨道类并初始化，
     /// 将轨道添加到内部的轨道列表
+    #[rustfmt::skip]
     fn create_track(&mut self, id: u16) -> Result<()> {
         let mut track = Track::new(id, self.options.clone())?;
         track.init()?;
