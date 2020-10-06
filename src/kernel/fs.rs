@@ -23,7 +23,7 @@ impl Fs {
     /// use super::Fs;
     /// use std::path::Path;
     ///
-    /// let fs = Fs::new(Path::new("./a.text"))?;
+    /// let fs = Fs::new(Path::new("./a.text")).unwrap();
     /// ```
     pub fn new(path: &Path) -> Result<Self> {
         let file = OpenOptions::new()
@@ -45,8 +45,8 @@ impl Fs {
     /// use super::Fs;
     /// use std::path::Path;
     ///
-    /// let fs = Fs::new(Path::new("./a.text"))?;
-    /// let metadata = fs.stat()?;
+    /// let fs = Fs::new(Path::new("./a.text")).unwrap();
+    /// let metadata = fs.stat().unwrap();
     /// ```
     pub fn stat(&self) -> Result<Metadata> {
         Ok(self.file.metadata()?)
@@ -60,8 +60,8 @@ impl Fs {
     /// use super::Fs;
     /// use std::path::Path;
     ///
-    /// let fs = Fs::new(Path::new("./a.text"))?;
-    /// fs.resize(0)?;
+    /// let fs = Fs::new(Path::new("./a.text")).unwrap();
+    /// fs.resize(0).unwrap();
     /// ```
     pub fn resize(&mut self, size: u64) -> Result<()> {
         self.file.set_len(size)?;
@@ -71,8 +71,26 @@ impl Fs {
 
     /// 将缓冲区写入文件
     ///
-    /// 写入操作具有原子性，
-    /// 这会将缓冲区完全写入到文件中
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use super::Fs;
+    /// use std::path::Path;
+    /// use bytes::Bytes;
+    ///
+    /// let mut fs = Fs::new(Path::new("./a.text")).unwrap();
+    /// fs.write(&Bytes::from(b"hello"), 0).unwrap();
+    /// ```
+    pub fn write(&mut self, chunk: &[u8], offset: u64) -> Result<()> {
+        self.seek(offset)?;
+        self.file.write_all(chunk)?;
+        self.cursor_next(chunk.len());
+        Ok(())
+    }
+    
+    /// 清空缓冲区
+    ///
+    /// 将写入缓冲区完全推入目标文件
     ///
     /// # Examples
     ///
@@ -81,14 +99,12 @@ impl Fs {
     /// use std::path::Path;
     /// use bytes::Bytes;
     ///
-    /// let mut fs = Fs::new(Path::new("./a.text"))?;
-    /// fs.write(&Bytes::from(b"hello"), 0)?;
+    /// let mut fs = Fs::new(Path::new("./a.text")).unwrap();
+    /// fs.write(&Bytes::from(b"hello"), 0).unwrap();
+    /// fs.flush().unwrap();
     /// ```
-    pub fn write(&mut self, chunk: &[u8], offset: u64) -> Result<()> {
-        self.seek(offset)?;
-        self.file.write_all(chunk)?;
+    pub fn flush(&mut self) -> Result<()> {
         self.file.flush()?;
-        self.cursor_next(chunk.len());
         Ok(())
     }
 
@@ -105,8 +121,8 @@ impl Fs {
     /// use bytes::BytesMut;
     ///
     /// let buffer = [0u8; 1024];
-    /// let mut fs = Fs::new(Path::new("./a.text"))?;
-    /// let size = fs.read(&mut buffer, 0)?;
+    /// let mut fs = Fs::new(Path::new("./a.text")).unwrap();
+    /// let size = fs.read(&mut buffer, 0).unwrap();
     /// ```
     pub fn read(&mut self, chunk: &mut [u8], offset: u64) -> Result<usize> {
         self.seek(offset)?;
@@ -128,8 +144,8 @@ impl Fs {
     /// use bytes::BytesMut;
     ///
     /// let buffer = [0u8; 1024];
-    /// let mut fs = Fs::new(Path::new("./a.text"))?;
-    /// fs.promise_read(&mut buffer, 0)?;
+    /// let mut fs = Fs::new(Path::new("./a.text")).unwrap();
+    /// fs.promise_read(&mut buffer, 0).unwrap();
     /// ```
     pub fn promise_read(&mut self, chunk: &mut [u8], offset: u64) -> Result<()> {
         self.seek(offset)?;
@@ -161,6 +177,15 @@ impl Fs {
 /// 读取目录所有条目
 ///
 /// 返回可迭代的条目流
+///
+/// # Examples
+///
+/// ```no_run
+/// use super::readdir;
+/// use std::path::Path;
+///
+/// println!("{:?}", readdir(Path::new("./data")).unwrap());
+/// ```
 pub fn readdir(path: &Path) -> Result<ReadDir> {
     Ok(read_dir(path)?)
 }

@@ -1,5 +1,4 @@
 use super::{fs::Fs, KernelOptions};
-use super::chunk::{Chunk, Codec, LazyResult};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use anyhow::Result;
 use std::rc::Rc;
@@ -22,7 +21,6 @@ pub struct Track {
     free_start: u64,
     real_size: u64,
     free_end: u64,
-    chunk: Codec,
     size: u64,
     file: Fs,
     id: u16,
@@ -41,7 +39,6 @@ impl Track {
         let path = options.directory.join(format!("{}.track", id));
         Ok(Self {
             file: Fs::new(path.as_path())?,
-            chunk: Codec::new(options.clone()),
             free_start: 0,
             real_size: 0,
             free_end: 0,
@@ -84,10 +81,10 @@ impl Track {
     /// track.init()?;
     /// let chunk = track.read(10)?;
     /// ```
-    pub fn read(&mut self, offset: u64) -> Result<Chunk> {
+    pub fn read(&mut self, offset: u64) -> Result<Vec<u8>> {
         let mut packet = vec![0u8; self.options.chunk_size as usize];
         self.file.promise_read(&mut packet, offset)?;
-        Ok(self.chunk.decoder(Bytes::from(packet)))
+        Ok(packet)
     }
 
     /// 分配分片写入位置
@@ -270,8 +267,8 @@ impl Track {
     /// track.init()?;
     /// track.write(Chunk, 20)?;
     /// ```
-    pub fn write(&mut self, chunk: Chunk, index: u64) -> Result<()> {
-        self.file.write(&self.chunk.encoder(chunk), index)
+    pub fn write(&mut self, chunk: &[u8], index: u64) -> Result<()> {
+        self.file.write(chunk, index)
     }
 
     /// 写入结束
