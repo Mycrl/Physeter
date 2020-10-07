@@ -1,6 +1,7 @@
-use super::Tracks;
+use super::{Tracks, AllocMap, KernelOptions};
 use anyhow::Result;
 use bytes::Bytes;
+use std::rc::Rc;
 
 /// 读取流
 ///
@@ -10,13 +11,14 @@ use bytes::Bytes;
 /// `tracks` 轨道列表  
 /// `track` 轨道索引  
 /// `index` 节点索引
-pub struct Reader {
+pub struct Reader<'a> {
+    alloc_map: &'a AllocMap,
     tracks: Tracks,
-    track: u16,
-    index: u64,
+    track: usize,
+    index: usize,
 }
 
-impl Reader {
+impl<'a> Reader<'a> {
     /// 创建读取流
     ///
     /// # Examples
@@ -28,11 +30,12 @@ impl Reader {
     /// let mut tracks = HashMap::new();
     /// let reader = Reader::new(0, 16, &mut tracks);
     /// ```
-    pub fn new(track: u16, index: u64, tracks: Tracks) -> Self {
+    pub fn new(tracks: Tracks, alloc_map: &'a AllocMap) -> Self {
         Self {
+            track: 0,
+            index: 0,
+            alloc_map,
             tracks,
-            track,
-            index,
         }
     }
 
@@ -49,21 +52,25 @@ impl Reader {
     /// let data = reader.read()?;
     /// ```
     #[rustfmt::skip]
-    pub fn read(&mut self) -> Result<(Bytes, bool)> {
-        let mut tracks = self.tracks.borrow_mut();
-        let track = tracks.get_mut(&self.track).unwrap();
-        let chunk = track.read(self.index)?;
+    pub fn read(&mut self) -> Result<Option<&[u8]>> {
+        if let Some((track_id, list)) = self.alloc_map.get(self.track) {
+            if let Some(index) = list.get(self.index) {
+                let mut tracks = self.tracks.borrow_mut();
+                let track = tracks.get_mut(&track_id).unwrap();
+                let chunk = track.read(*index)?;
+                if self.index + 1 >= list.len() {
+                    self.track += 1;
+                    self.index = 0;
+                } else {
+                    self.index += 1;
+                }
 
-        // 如果链表还未结束
-        // 将下个位置保存到内部游标
-        if let (Some(next), Some(track_id)) = (chunk.next, chunk.next_track) {
-            self.track = track_id;
-            self.index = next;
+                Ok(Some(&chunk.data))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
         }
-
-        Ok((
-            chunk.data, 
-            chunk.next.is_some()
-        ))
     }
 }

@@ -1,3 +1,4 @@
+mod chunk;
 mod disk;
 mod index;
 mod track;

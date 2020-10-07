@@ -1,37 +1,10 @@
 use super::KernelOptions;
-use std::iter::Iterator;
-use std::collections::HashMap;
 use bytes::{BufMut, BytesMut};
 use anyhow::Result;
 use rocksdb::DB;
 
 /// 分配表
-pub type AllocMap = HashMap<u16, Vec<u64>>;
-
-/// 惰性分配表
-///
-/// 初始化时并不会全部序列化所有索引，
-/// 需要的时候再序列化相对应索引，
-/// 以此降低没有必要的开销
-pub type LazyMap<'a> = HashMap<u16, List<'a>>;
-
-/// 索引列表
-///
-/// 索引列表迭代器，
-/// 降低序列化开销
-pub struct List<'a> {
-    buffer: &'a [u8],
-    cursor: usize
-}
-
-impl<'a> List<'a> {
-    pub fn from(buffer: &'a [u8]) -> Self {
-        Self {
-            cursor: 0,
-            buffer
-        }
-    }
-}
+pub type AllocMap = Vec<(u16, Vec<u64>)>;
 
 /// 索引
 ///
@@ -126,7 +99,7 @@ impl Index {
     /// 
     /// ```
     #[rustfmt::skip]
-    pub fn get(&self, key: &[u8]) -> Result<Option<LazyMap>> {
+    pub fn get(&self, key: &[u8]) -> Result<Option<AllocMap>> {
         Ok(match self.0.get_pinned(key)? {
             Some(x) => Some(decoder(unsafe { 
                 std::mem::transmute(&*x) 
@@ -157,36 +130,14 @@ impl Index {
     }
 }
 
-impl<'a> Iterator for List<'a> {
-    type Item = u64;
-    #[rustfmt::skip]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cursor + 8 > self.buffer.len() {
-            return None
-        }
-
-        self.cursor += 8;
-        Some(u64::from_be_bytes([
-            self.buffer[self.cursor - 7],
-            self.buffer[self.cursor - 6],
-            self.buffer[self.cursor - 5],
-            self.buffer[self.cursor - 4],
-            self.buffer[self.cursor - 3],
-            self.buffer[self.cursor - 2],
-            self.buffer[self.cursor - 1],
-            self.buffer[self.cursor]
-        ]))
-    }
-}
-
 /// 解码索引
 ///
 /// 将索引缓冲区转为
 /// 可迭代的索引列表
 #[rustfmt::skip]
-fn decoder(chunk: &[u8]) -> LazyMap {
+fn decoder(chunk: &[u8]) -> AllocMap {
     let count_size = chunk.len();
-    let mut result = HashMap::new();
+    let mut result = Vec::new();
     let mut index = 0;
 
     // 无限循环
@@ -222,8 +173,26 @@ loop {
     let start_index = index + 6;
     let end_index = index + size;
     let chunk_slice = &chunk[start_index..end_index];
-    result.insert(id, List::from(chunk_slice));
+    let mut list = Vec::new();
+    
+    for i in 0..item_size {
+        let index = i * 8;
+        list.push(u64::from_be_bytes([
+            chunk_slice[index],
+            chunk_slice[index + 1],
+            chunk_slice[index + 2],
+            chunk_slice[index + 3],
+            chunk_slice[index + 4],
+            chunk_slice[index + 5],
+            chunk_slice[index + 6],
+            chunk_slice[index + 7]
+        ]));
+    }
+
     index += size;
+    result.push((
+        id, list
+    ));
 }
 
     result
@@ -235,11 +204,9 @@ loop {
 /// 字节缓冲区
 fn encoder(map: &AllocMap) -> BytesMut {
     let mut packet = BytesMut::new();
-
-    for (id, value) in map.iter() {
+    for (id, value) in map {
         packet.put_u16(*id);
         packet.put_u32(value.len() as u32);
-
         for index in value {
             packet.put_u64(*index);
         }

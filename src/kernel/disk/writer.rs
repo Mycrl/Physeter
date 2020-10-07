@@ -8,7 +8,6 @@ use std::rc::Rc;
 pub enum Callback {
     Index(u64),
     CreateTrack(u16),
-    FirstIndex(u16, u64)
 }
 
 /// 链表上个节点
@@ -45,7 +44,7 @@ pub struct Writer {
     write_tracks: HashSet<u16>,
     previous: Option<Previous>,
     buffer: BytesMut,
-    diff_size: u64,
+    diff_size: usize,
     track: u16,
     id: u32,
 }
@@ -65,7 +64,7 @@ impl Writer {
     /// ```
     pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
         Self {
-            diff_size: options.chunk_size - 17,
+            diff_size: (options.chunk_size - 10) as usize,
             buffer: BytesMut::new(),
             write_tracks: HashSet::new(),
             first_track: None,
@@ -120,20 +119,20 @@ impl Writer {
         if let Some(previous) = self.previous.as_ref() {
             let mut tracks = self.tracks.borrow_mut();
             let track = tracks.get_mut(&previous.track).unwrap();
-            track.write(previous.into_chunk(None, None), previous.index)?;
+            track.write(&previous.into_chunk(None), previous.index)?;
         }
 
         // 遍历所有受影响的轨道
         // 为每个轨道保存状态
         for track_id in &self.write_tracks {
             let mut tracks = self.tracks.borrow_mut();
-            tracks.get_mut(track_id).unwrap().write_end()?;
+            tracks.get_mut(track_id).unwrap().flush()?;
         }
 
         // 回调写入结束
         // 将链表头部位置返回给上层
         if let (Some(track), Some(index)) = (self.first_track, self.first_index) {
-            return Ok(Some(Callback::FirstIndex(track, index)))
+            // return Ok(Some(Callback::FirstIndex(track, index)))
         }
         
         Ok(None)
@@ -174,7 +173,7 @@ impl Writer {
     #[rustfmt::skip]
     fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<Option<Callback>> {
         self.buffer.extend_from_slice(chunk);
-        let diff_size = self.diff_size as usize;
+        let diff_size = self.diff_size;
 
         // 无限循环
         // 直到无法继续分配
@@ -219,7 +218,7 @@ impl Writer {
         if let Some(previous) = self.previous.as_mut() {
             let mut tracks = self.tracks.borrow_mut();
             let track = tracks.get_mut(&previous.track).unwrap();
-            track.write(previous.into_chunk(Some(self.track), Some(index)), previous.index)?;
+            track.write(&previous.into_chunk(Some(index)), previous.index)?;
         }
 
         // 如果缓冲区大小比分配长度小
@@ -249,15 +248,11 @@ impl Writer {
 impl Previous {
     #[rustfmt::skip]
     pub fn into_chunk(
-        &self, 
-        next_track: Option<u16>, 
+        &self,
         next: Option<u64>
     ) -> Chunk {
         Chunk {
             data: Bytes::copy_from_slice(&self.data[..]),
-            exist: true,
-            id: self.id,
-            next_track,
             next,
         }
     }

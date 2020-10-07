@@ -1,6 +1,7 @@
 mod reader;
 mod writer;
 
+pub use super::index::AllocMap;
 pub use super::{fs::readdir, chunk::Chunk};
 pub use super::{track::Track, KernelOptions};
 use std::{cell::RefCell, rc::Rc};
@@ -99,17 +100,16 @@ impl Disk {
     /// disk.read(file, 0, 19)?;
     /// ```
     #[rustfmt::skip]
-    pub fn read(&mut self, mut stream: impl Write, track: u16, index: u64) -> Result<()> {
-        let mut reader = Reader::new(track, index, self.tracks.clone());
+    pub fn read(&mut self, mut stream: impl Write, alloc_map: &AllocMap) -> Result<()> {
+        let mut reader = Reader::new(self.tracks.clone(), alloc_map);
 
         // 无限循环
         // 将轨道数据全部读取
         // 写入外部流中
     loop {
-        let (data, is_next) = reader.read()?;
-        stream.write_all(&data)?;
-        if !is_next {
-            break;
+        match reader.read()? {
+            Some(data) => stream.write_all(data)?,
+            None => break
         }
     }
 
@@ -195,16 +195,16 @@ impl Disk {
         // 从头部轨道开始删除，
         // 一直到删除完成
     loop {
-        match self.tracks.borrow_mut().get_mut(&track_id) {
-            Some(track) => match track.remove(track_index)? {
-                Some(index) => match (index.next, index.next_track) {
-                    (Some(next), Some(next_track)) => {
-                        track_id = next_track;
-                        track_index = next;
-                    }, _ => { break; }
-                }, None => { break; }
-            }, None => { break; }
-        }
+        // match self.tracks.borrow_mut().get_mut(&track_id) {
+        //     Some(track) => match track.remove(track_index)? {
+        //         Some(index) => match (index.next, index.next_track) {
+        //             (Some(next), Some(next_track)) => {
+        //                 track_id = next_track;
+        //                 track_index = next;
+        //             }, _ => { break; }
+        //         }, None => { break; }
+        //     }, None => { break; }
+        // }
     }
 
         Ok(())

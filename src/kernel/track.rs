@@ -1,5 +1,6 @@
 use super::{fs::Fs, KernelOptions};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use super::chunk::{Codec, Chunk};
 use anyhow::Result;
 use std::rc::Rc;
 
@@ -21,6 +22,7 @@ pub struct Track {
     free_start: u64,
     real_size: u64,
     free_end: u64,
+    chunk: Codec,
     size: u64,
     file: Fs,
     id: u16,
@@ -39,6 +41,7 @@ impl Track {
         let path = options.directory.join(format!("{}.track", id));
         Ok(Self {
             file: Fs::new(path.as_path())?,
+            chunk: Codec::new(options),
             free_start: 0,
             real_size: 0,
             free_end: 0,
@@ -81,10 +84,10 @@ impl Track {
     /// track.init()?;
     /// let chunk = track.read(10)?;
     /// ```
-    pub fn read(&mut self, offset: u64) -> Result<Vec<u8>> {
+    pub fn read(&mut self, offset: u64) -> Result<Chunk> {
         let mut packet = vec![0u8; self.options.chunk_size as usize];
         self.file.promise_read(&mut packet, offset)?;
-        Ok(packet)
+        Ok(self.chunk.decoder(Bytes::from(packet)))
     }
 
     /// 分配分片写入位置
@@ -124,25 +127,16 @@ impl Track {
 
         // 读取失效分片
         // 并解码失效分片
-        let mut buffer = vec![0u8; chunk_size as usize];
+        let mut buffer = [0u8; 8];
         self.file.read(&mut buffer, self.free_start)?;
-        let value = self.chunk.lazy_decoder(Bytes::from(buffer));
-
-        // 如果还有失效分片
-        // 则更新链表头部为下个分片位置
-        // 如果失效分片已经全部解决
-        // 则归零链表头部
+        let next = u64::from_be_bytes(buffer);
         let free_start = self.free_start;
-        self.free_start = match value.next {
-            Some(next) => next,
-            None => 0,
-        };
 
-        // 归零链表头部时
-        // 也同时归零链表尾部
-        // 因为已无失效分片
-        if self.free_start == 0 {
-            self.free_end = 0
+        if self.free_end > 0 && next == self.free_end {
+            self.free_start = 0;
+            self.free_end = 0;
+        } else {
+            self.free_start = next;
         }
 
         Ok(Some(free_start))
@@ -168,81 +162,30 @@ impl Track {
     /// let track_id = track.remove(10)?;
     /// ```
     #[rustfmt::skip]
-    pub fn remove(&mut self, index: u64) -> Result<Option<LazyResult>> {
-        let mut first = false;
-        let mut offset = index;
-        let free_byte = [0u8];
-
-        // 无限循环
-        // 直到失效所有分片
-    loop {
-
-        // 遍历完文件
-        // 跳出循环
-        if offset >= self.options.track_size {
-            break;
+    pub fn remove(&mut self, alloc_map: &Vec<u64>) -> Result<()> {
+        assert!(alloc_map.len() > 0);
+        
+        // 获取头部索引
+        // 获取尾部索引
+        let first = alloc_map.first().unwrap();
+        let last = alloc_map.last().unwrap();
+        
+        // 失效索引尾部更新
+        // 更新为当前尾部位置
+        self.free_end = *last;
+        
+        // 如果当前没有已失效的块
+        // 则直接更新头部索引
+        // 如果存在则首尾链接
+        if self.free_start > 0 {
+            let next_buf = first.to_be_bytes();
+            self.file.write(&next_buf, self.free_end)?;
+        } else {
+            self.free_start = *first;
         }
-
-        // 读取分片
-        // 如果没有数据则跳出
-        let mut chunk = vec![0u8; self.options.chunk_size as usize];
-        let size = self.file.read(&mut chunk[..], offset)?;
-        if size == 0 {
-            break;
-        }
-
-        // 轨道数据长度减去单分片长度
-        // 更改状态位为失效并解码当前分片
-        self.size -= self.options.chunk_size;
-        self.file.write(&free_byte, offset + 4)?;
-        let value = self.chunk.lazy_decoder(Bytes::from(chunk));
-
-        // 如果失效索引头未初始化
-        // 则先初始化索引头
-        if self.free_start == 0 {
-            let mut next_buf = BytesMut::new();
-            next_buf.put_u64(offset);
-            self.file.write(&next_buf, 0)?;
-            self.free_start = offset;
-        }
-
-        // 如果尾部索引已存在
-        // 则将当前尾部和现在的分片索引连接
-        // 连接的目的是因为失效块是个连续的链表
-        // 所以这里将首个失效块跟上个尾部失效块连接
-        if self.free_end > 0 && first == false {
-            let mut next_buf = BytesMut::new();
-            next_buf.put_u64(offset);
-            self.file.write(&next_buf, self.free_end + 7)?;
-        }
-
-        // 如果下个索引为空
-        // 则表示分片列表已到尾部
-        // 更新失效索引尾部并跳出循环
-        if let None = value.next {
-            let mut end_buf = BytesMut::new();
-            end_buf.put_u64(offset);
-            self.file.write(&end_buf, 8)?;
-            self.free_end = offset;
-            break;
-        }
-
-        // 更新索引
-        if let Some(next) = value.next {
-            offset = next;
-        }
-
-        // 下个索引不在这个轨道文件
-        // 转移到其他轨道继续流程
-        first = true;
-        if let Some(track) = value.next_track {
-            if track != self.id {
-                return Ok(Some(value))
-            }
-        }
-    }
-
-        Ok(None)
+        
+        // 保存状态
+        self.flush()
     }
 
     /// 写入分片
@@ -267,8 +210,8 @@ impl Track {
     /// track.init()?;
     /// track.write(Chunk, 20)?;
     /// ```
-    pub fn write(&mut self, chunk: &[u8], index: u64) -> Result<()> {
-        self.file.write(chunk, index)
+    pub fn write(&mut self, chunk: &Chunk, index: u64) -> Result<()> {
+        self.file.write(self.chunk.encoder(chunk), index)
     }
 
     /// 写入结束
@@ -298,12 +241,13 @@ impl Track {
     /// track.write(Chunk, 20)?;
     /// track.write_end()?;
     /// ```
-    pub fn write_end(&mut self) -> Result<()> {
+    pub fn flush(&mut self) -> Result<()> {
         let mut packet = BytesMut::new();
         packet.put_u64(self.free_start);
         packet.put_u64(self.free_end);
         packet.put_u64(self.size);
-        self.file.write(&packet, 0)
+        self.file.write(&packet, 0)?;
+        self.file.flush()
     }
 
     /// 创建默认文件头
