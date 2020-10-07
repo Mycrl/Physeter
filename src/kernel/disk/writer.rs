@@ -182,7 +182,7 @@ impl Writer {
         }
 
         // 尝试分配轨道
-        let mut index = 0;
+        let index;
         let alloc_result = self.alloc()?;
         if let Callback::Index(offset) = alloc_result {
             index = offset;
