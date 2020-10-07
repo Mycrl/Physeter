@@ -25,7 +25,6 @@ pub struct Track {
     chunk: Codec,
     size: u64,
     file: Fs,
-    id: u16,
 }
 
 impl Track {
@@ -40,14 +39,13 @@ impl Track {
     pub fn new(id: u16, options: Rc<KernelOptions>) -> Result<Track> {
         let path = options.directory.join(format!("{}.track", id));
         Ok(Self {
+            chunk: Codec::new(options.clone()),
             file: Fs::new(path.as_path())?,
-            chunk: Codec::new(options),
             free_start: 0,
             real_size: 0,
             free_end: 0,
             size: 0,
             options,
-            id,
         })
     }
 
@@ -211,7 +209,7 @@ impl Track {
     /// track.write(Chunk, 20)?;
     /// ```
     pub fn write(&mut self, chunk: &Chunk, index: u64) -> Result<()> {
-        self.file.write(self.chunk.encoder(chunk), index)
+        self.file.write(&self.chunk.encoder(chunk), index)
     }
 
     /// 写入结束

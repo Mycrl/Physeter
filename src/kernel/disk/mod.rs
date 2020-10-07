@@ -108,7 +108,7 @@ impl Disk {
         // 写入外部流中
     loop {
         match reader.read()? {
-            Some(data) => stream.write_all(data)?,
+            Some(data) => stream.write_all(&data)?,
             None => break
         }
     }
@@ -137,7 +137,7 @@ impl Disk {
     /// let (track, index) = disk.write(file)?;
     /// ```
     #[rustfmt::skip]
-    pub fn write<'a>(&mut self, mut stream: impl Read) -> Result<(u16, u64)> {
+    pub fn write<'a>(&mut self, mut stream: impl Read) -> Result<AllocMap> {
         let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
         let mut buffer = [0; 2048];
         let mut size = 1;
@@ -166,7 +166,7 @@ impl Disk {
         if let Some(callback) = writer.write(data)? {
             match callback {
                 Callback::CreateTrack(track) => self.create_track(track)?,
-                Callback::FirstIndex(track, index) => return Ok((track, index)),
+                Callback::Done => return Ok(writer.alloc_map),
                 _ => ()
             }
         }
@@ -187,25 +187,13 @@ impl Disk {
     /// disk.remove(0, 16)?;
     /// ```
     #[rustfmt::skip]
-    pub fn remove(&mut self, track: u16, index: u64) -> Result<()> {
-        let mut track_index = index;
-        let mut track_id = track;
-        
-        // 无限循环
-        // 从头部轨道开始删除，
-        // 一直到删除完成
-    loop {
-        // match self.tracks.borrow_mut().get_mut(&track_id) {
-        //     Some(track) => match track.remove(track_index)? {
-        //         Some(index) => match (index.next, index.next_track) {
-        //             (Some(next), Some(next_track)) => {
-        //                 track_id = next_track;
-        //                 track_index = next;
-        //             }, _ => { break; }
-        //         }, None => { break; }
-        //     }, None => { break; }
-        // }
-    }
+    pub fn remove(&mut self, alloc_map: &AllocMap) -> Result<()> {
+        let mut tracks = self.tracks.borrow_mut();
+        for (track_id, list) in alloc_map {
+            if let Some(track) = tracks.get_mut(track_id) {
+                track.remove(list)?;
+            }
+        }
 
         Ok(())
     }

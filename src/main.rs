@@ -19,15 +19,15 @@ fn main() -> Result<()> {
     let reader = std::fs::File::open("./末代皇帝.mp4")?;
 
     let start = Instant::now();
-    kernel.write("test", reader)?;
+    kernel.write(b"test", reader)?;
     println!("write cost: {:?} ms", start.elapsed().as_millis());
 
     let start = Instant::now();
-    kernel.read("test", writer)?;
+    kernel.read(b"test", writer)?;
     println!("read cost: {:?} ms", start.elapsed().as_millis());
 
     let start = Instant::now();
-    kernel.delete("test")?;
+    kernel.delete(b"test")?;
     println!("delete cost: {:?} ms", start.elapsed().as_millis());
 
     Ok(())

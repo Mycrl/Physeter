@@ -52,7 +52,7 @@ impl<'a> Reader<'a> {
     /// let data = reader.read()?;
     /// ```
     #[rustfmt::skip]
-    pub fn read(&mut self) -> Result<Option<&[u8]>> {
+    pub fn read(&mut self) -> Result<Option<Bytes>> {
         if let Some((track_id, list)) = self.alloc_map.get(self.track) {
             if let Some(index) = list.get(self.index) {
                 let mut tracks = self.tracks.borrow_mut();
@@ -65,7 +65,7 @@ impl<'a> Reader<'a> {
                     self.index += 1;
                 }
 
-                Ok(Some(&chunk.data))
+                Ok(Some(chunk.data))
             } else {
                 Ok(None)
             }

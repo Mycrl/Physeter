@@ -83,13 +83,11 @@ impl Kernel {
     /// let file = std::fs::File::open("test.mp4")?;
     /// kernel.read("test", file)?;
     /// ```
-    pub fn read(&mut self, name: impl ToString, stream: impl Write) -> Result<()> {
-        // match self.index.get(&name.to_string()) {
-        //     Some(Index { start_chunk, .. }) => 
-        //         self.disk.read(stream, start_chunk.0, start_chunk.1),
-        //     _ => Err(anyhow!("not found"))
-        // }
-        Ok(())
+    pub fn read(&mut self, key: &[u8], stream: impl Write) -> Result<()> {
+        match self.index.get(key)? {
+            Some(x) => self.disk.read(stream, &x),
+            _ => Err(anyhow!("not found"))
+        }
     }
 
     /// 写入数据
@@ -107,16 +105,9 @@ impl Kernel {
     /// let file = std::fs::File::open("test.mp4")?;
     /// kernel.write("test", file)?;
     /// ```
-    pub fn write(&mut self, name: impl ToString, stream: impl Read) -> Result<()> {
-        // if self.index.has(&name.to_string()) {
-        //     return Err(anyhow!("not empty"))
-        // }
-        
-        // self.index.set(name.to_string(), Index {
-        //     start_chunk: self.disk.write(stream)?,
-        //     start_matedata: (0, 0)
-        // });
-        
+    pub fn write(&mut self, key: &[u8], stream: impl Read) -> Result<()> {
+        if self.index.has(key)? { return Err(anyhow!("not empty")) }
+        self.index.set(key, &self.disk.write(stream)?);
         Ok(())
     }
 
@@ -134,16 +125,15 @@ impl Kernel {
     ///
     /// kernel.delete("test")?;
     /// ```
-    pub fn delete(&mut self, name: impl ToString) -> Result<()> {
-        // match self.index.get(&name.to_string()) {
-        //     None => Err(anyhow!("not found")),
-        //     Some(Index { start_chunk, .. }) => {
-        //         self.disk.remove(start_chunk.0, start_chunk.1)?;
-        //         self.index.remove(&name.to_string());
-        //         Ok(())
-        //     }
-        // }
-        Ok(())
+    pub fn delete(&mut self, key: &[u8]) -> Result<()> {
+        match self.index.get(key)? {
+            None => Err(anyhow!("not found")),
+            Some(x) => {
+                self.disk.remove(&x)?;
+                self.index.remove(key);
+                Ok(())
+            }
+        }
     }
 }
 

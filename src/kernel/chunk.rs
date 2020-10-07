@@ -63,7 +63,7 @@ impl Codec {
     /// let packet = codec.encoder(chunk.clone());
     /// ```
     #[rustfmt::skip]
-    pub fn encoder(&self, chunk: &Chunk) -> &[u8] {
+    pub fn encoder(&self, chunk: &Chunk) -> Bytes {
         let mut packet = BytesMut::new();
 
         let size = match chunk.data.len() == self.diff_size as usize {
@@ -78,13 +78,13 @@ impl Codec {
 
         packet.put_u64(next);
         packet.put_u16(size);
-        packet.put(chunk.data);
+        packet.extend_from_slice(&chunk.data);
 
         if packet.len() < self.chunk_size {
             packet.resize(self.chunk_size, 0);
         }
 
-        &packet
+        packet.freeze()
     }
 
     /// 解码分片

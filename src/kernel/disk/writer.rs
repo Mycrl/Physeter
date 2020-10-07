@@ -1,13 +1,14 @@
 use anyhow::Result;
 use bytes::{Bytes, BytesMut};
-use super::{KernelOptions, Chunk, Tracks};
-use std::collections::HashSet;
+use super::{KernelOptions, Chunk, Tracks, AllocMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// 写入回调任务
 pub enum Callback {
     Index(u64),
     CreateTrack(u16),
+    Done
 }
 
 /// 链表上个节点
@@ -15,7 +16,6 @@ pub enum Callback {
 /// 因为链表的特性导致写入需要延迟，
 /// 所以需要保存上个节点的状态
 pub struct Previous {
-    id: u32,
     track: u16,
     index: u64,
     data: BytesMut
@@ -26,11 +26,7 @@ pub struct Previous {
 /// 写入数据到轨道中，
 /// 内部维护游标和写入策略
 ///
-/// `tracks` 轨道列表  
-/// `options` 配置  
-/// `write_tracks` 写入轨道列表  
-/// `first_track` 首个写入轨道  
-/// `first_index` 首个写入索引  
+/// `tracks` 轨道列表     
 /// `previous` 链表节点缓存  
 /// `callback` 创建轨道回调  
 /// `diff_size` 轨道最大数据长度  
@@ -39,14 +35,12 @@ pub struct Previous {
 /// `id` 分片索引
 pub struct Writer {
     tracks: Tracks,
-    pub first_track: Option<u16>,
-    pub first_index: Option<u64>,
-    write_tracks: HashSet<u16>,
+    pub alloc_map: AllocMap,
+    index: HashMap<u16, usize>,
     previous: Option<Previous>,
     buffer: BytesMut,
     diff_size: usize,
     track: u16,
-    id: u32,
 }
 
 impl Writer {
@@ -56,7 +50,6 @@ impl Writer {
     ///
     /// ```no_run
     /// use super::{Writer, KernelOptions};
-    /// use std::collections::HashMap;
     ///
     /// let mut tracks = HashMap::new();
     /// let options = KernelOptions::default();
@@ -66,13 +59,11 @@ impl Writer {
         Self {
             diff_size: (options.chunk_size - 10) as usize,
             buffer: BytesMut::new(),
-            write_tracks: HashSet::new(),
-            first_track: None,
-            first_index: None,
+            alloc_map: Vec::new(),
+            index: HashMap::new(),
             previous: None,
             track: 1,
             tracks,
-            id: 0,
         }
     }
 
@@ -124,18 +115,12 @@ impl Writer {
 
         // 遍历所有受影响的轨道
         // 为每个轨道保存状态
-        for track_id in &self.write_tracks {
+        for (track_id, _) in self.index.iter() {
             let mut tracks = self.tracks.borrow_mut();
             tracks.get_mut(track_id).unwrap().flush()?;
         }
-
-        // 回调写入结束
-        // 将链表头部位置返回给上层
-        if let (Some(track), Some(index)) = (self.first_track, self.first_index) {
-            // return Ok(Some(Callback::FirstIndex(track, index)))
-        }
         
-        Ok(None)
+        Ok(Some(Callback::Done))
     }
 
     /// 分配写入轨道
@@ -202,15 +187,9 @@ impl Writer {
         
         // 为了避免不必要的重复写入
         // 所以这里先检查轨道索引是否存在
-        if !self.write_tracks.contains(&self.track) {
-            self.write_tracks.insert(self.track);
-        }
-
-        // 如果没有节点缓存
-        // 则为首次写入，记录写入轨道和索引
-        if let None = self.previous {
-            self.first_track = Some(self.track);
-            self.first_index = Some(index);
+        if !self.index.contains_key(&self.track) {
+            self.index.insert(self.track, self.alloc_map.len());
+            self.alloc_map.push((self.track, Vec::new()));
         }
 
         // 如果存在节点缓存
@@ -229,16 +208,19 @@ impl Writer {
             diff_size
         );
 
-        // 初始化节点缓存
+        // 重置节点缓存
         self.previous = Some(Previous {
             data: self.buffer.split_to(off_index),
             track: self.track,
-            id: self.id,
             index
         });
 
-        // 分片序号递加
-        self.id += 1;
+        // 将节点索引写入分配表
+        if let Some(offset) = self.index.get(&self.track) {
+            if let Some((_, list)) = self.alloc_map.get_mut(*offset) {
+                list.push(index);
+            }
+        }
     }
 
         Ok(None)
