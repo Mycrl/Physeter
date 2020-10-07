@@ -1,6 +1,6 @@
+use super::chunk::{Chunk, Codec};
 use super::{fs::Fs, KernelOptions};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use super::chunk::{Codec, Chunk};
 use anyhow::Result;
 use std::rc::Rc;
 
@@ -9,14 +9,6 @@ use std::rc::Rc;
 /// 数据存储在轨道文件内，
 /// 数据被拆分成固定大小的分片以链表形式写入，
 /// 删除数据只会标记分片为失效，下次写入将覆盖分片
-///
-/// `options` 配置  
-/// `free_start` 失效头索引  
-/// `free_end` 失效尾部索引  
-/// `chunk` 分片类  
-/// `size` 轨道大小  
-/// `file` 文件类  
-/// `id` 轨道ID
 pub struct Track {
     options: Rc<KernelOptions>,
     free_start: u64,
@@ -32,12 +24,17 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, KernelOptions};
+    /// use std::rc::Rc;
     ///
-    /// let options = KernelOptions::default();
-    /// let track = Track::new(0, &options);
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let track = Track::new(0, options).unwrap();
     /// ```
     pub fn new(id: u16, options: Rc<KernelOptions>) -> Result<Track> {
-        let path = options.directory.join(format!("{}.track", id));
+        let path = options.path.join(format!("{}.track", id));
         Ok(Self {
             chunk: Codec::new(options.clone()),
             file: Fs::new(path.as_path())?,
@@ -58,10 +55,15 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, KernelOptions};
+    /// use std::rc::Rc;
     ///
-    /// let options = KernelOptions::default();
-    /// let mut track = Track::new(0, &options);
-    /// track.init()?;
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let mut track = Track::new(0, options).unwrap();
+    /// track.init().unwrap();
     /// ```
     pub fn init(&mut self) -> Result<()> {
         self.real_size = self.file.stat()?.len();
@@ -76,11 +78,17 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, KernelOptions};
+    /// use std::rc::Rc;
     ///
-    /// let options = KernelOptions::default();
-    /// let mut track = Track::new(0, &options);
-    /// track.init()?;
-    /// let chunk = track.read(10)?;
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let mut track = Track::new(0, options).unwrap();
+    /// track.init().unwrap();
+    /// 
+    /// let chunk = track.read(10).unwrap();
     /// ```
     pub fn read(&mut self, offset: u64) -> Result<Chunk> {
         let mut packet = vec![0u8; self.options.chunk_size as usize];
@@ -98,46 +106,54 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, KernelOptions};
+    //// use std::rc::Rc;
     ///
-    /// let options = KernelOptions::default();
-    /// let mut track = Track::new(0, &options);
-    /// track.init()?;
-    /// let index = track.alloc()?;
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let mut track = Track::new(0, options).unwrap();
+    /// track.init().unwrap();
+    ///
+    /// let index = track.alloc().unwrap();
     /// ```
     pub fn alloc(&mut self) -> Result<Option<u64>> {
         let chunk_size = self.options.chunk_size;
         let track_size = self.options.track_size;
+        let free_start = self.free_start;
         let real_size = self.real_size;
-        
+
         // 避免写入放大(WAF)
         // 先写入轨道文件尾部
         if real_size + chunk_size <= track_size {
             self.real_size += chunk_size;
             self.size += chunk_size;
-            return Ok(Some(real_size))
+            return Ok(Some(real_size));
         }
-        
+
         // 没有失效块
         // 并且轨道不够写入
-        if self.free_start == 0 {
+        if free_start == 0 {
             return Ok(None);
         }
 
         // 读取失效分片
         // 并解码失效分片
         let mut buffer = [0u8; 8];
-        self.file.read(&mut buffer, self.free_start)?;
+        self.file.read(&mut buffer, free_start)?;
         let next = u64::from_be_bytes(buffer);
-        let free_start = self.free_start;
 
-        if self.free_end > 0 && next == self.free_end {
+        // 检查失效分片是否已经分配完成
+        // 如果分配完整则重置失效分片状态
+        Ok(if self.free_end > 0 && next == self.free_end {
             self.free_start = 0;
             self.free_end = 0;
+            None
         } else {
             self.free_start = next;
-        }
-
-        Ok(Some(free_start))
+            Some(free_start)
+        })
     }
 
     /// 删除数据
@@ -153,11 +169,17 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, KernelOptions};
+    /// use std::rc::Rc;
     ///
-    /// let options = KernelOptions::default();
-    /// let mut track = Track::new(0, &options);
-    /// track.init()?;
-    /// let track_id = track.remove(10)?;
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let mut track = Track::new(0, options).unwrap();
+    /// track.init().unwrap();
+    ///
+    /// let track_id = track.remove(10).unwrap();
     /// ```
     #[rustfmt::skip]
     pub fn remove(&mut self, alloc_map: &Vec<u64>) -> Result<()> {
@@ -194,19 +216,22 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, Chunk, KernelOptions};
+    /// use std::rc::Rc;
     ///
     /// let chunk = Chunk {
-    ///     id: 0,
-    ///     exist: true,
     ///     next: Some(17),
-    ///     next_track: None,
     ///     data: Bytes::from_static(b"hello"),
     /// };
     ///
-    /// let options = KernelOptions::default();
-    /// let mut track = Track::new(0, &options);
-    /// track.init()?;
-    /// track.write(Chunk, 20)?;
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let mut track = Track::new(0, options).unwrap();
+    /// track.init().unwrap();
+    ///
+    /// track.write(&chunk, 20).unwrap();
     /// ```
     pub fn write(&mut self, chunk: &Chunk, index: u64) -> Result<()> {
         self.file.write(&self.chunk.encoder(chunk), index)
@@ -224,20 +249,23 @@ impl Track {
     ///
     /// ```no_run
     /// use super::{Track, Chunk, KernelOptions};
+    /// use std::rc::Rc;
     ///
     /// let chunk = Chunk {
-    ///     id: 0,
-    ///     exist: true,
     ///     next: Some(17),
-    ///     next_track: None,
     ///     data: Bytes::from_static(b"hello"),
     /// };
     ///
-    /// let options = KernelOptions::default();
-    /// let mut track = Track::new(0, &options);
-    /// track.init()?;
-    /// track.write(Chunk, 20)?;
-    /// track.write_end()?;
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let mut track = Track::new(0, options).unwrap();
+    /// track.init().unwrap();
+    ///
+    /// track.write(Chunk, 20).unwrap();
+    /// track.flush().unwrap();
     /// ```
     pub fn flush(&mut self) -> Result<()> {
         let mut packet = BytesMut::new();
@@ -258,6 +286,7 @@ impl Track {
         buf.put_u64(0);
         buf.put_u64(24);
         self.file.write(&buf, 0)?;
+        self.real_size = 24;
         self.size = 24;
         Ok(())
     }
@@ -268,10 +297,9 @@ impl Track {
     /// 这是必要的操作，轨道实例化的时候必须要
     /// 从文件中恢复上次的状态
     fn read_header(&mut self) -> Result<()> {
-
         // 如果文件为空
         // 则直接写入默认头索引
-        if self.size == 0 {
+        if self.real_size == 0 {
             return self.default_header();
         }
 
@@ -284,7 +312,7 @@ impl Track {
         self.free_start = packet.get_u64();
         self.free_end = packet.get_u64();
         self.size = packet.get_u64();
-
+        
         Ok(())
     }
 }

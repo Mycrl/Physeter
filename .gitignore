@@ -1,2 +1,4 @@
 /target
 *.mp4
+/.static
+/testing

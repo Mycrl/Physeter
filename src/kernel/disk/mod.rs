@@ -2,14 +2,14 @@ mod reader;
 mod writer;
 
 pub use super::index::AllocMap;
-pub use super::{fs::readdir, chunk::Chunk};
+pub use super::{chunk::Chunk, fs::readdir};
 pub use super::{track::Track, KernelOptions};
-use std::{cell::RefCell, rc::Rc};
 use std::collections::HashMap;
-use writer::{Writer, Callback};
 use std::io::{Read, Write};
-use reader::Reader;
+use std::{cell::RefCell, rc::Rc};
+use writer::{Callback, Writer};
 use anyhow::Result;
+use reader::Reader;
 
 /// 轨道列表
 pub type Tracks = Rc<RefCell<HashMap<u16, Track>>>;
@@ -17,9 +17,6 @@ pub type Tracks = Rc<RefCell<HashMap<u16, Track>>>;
 /// 内部存储
 ///
 /// 管理所有轨道的读取和写入
-///
-/// `options` 配置  
-/// `tracks` 轨道列表
 pub struct Disk {
     options: Rc<KernelOptions>,
     tracks: Tracks,
@@ -32,8 +29,13 @@ impl Disk {
     ///
     /// ```no_run
     /// use super::{Disk, KernelOptions};
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
-    /// let options = KernelOptions::default();
     /// let disk = Disk::new(options);
     /// ```
     pub fn new(options: Rc<KernelOptions>) -> Self {
@@ -52,10 +54,15 @@ impl Disk {
     ///
     /// ```no_run
     /// use super::{Disk, KernelOptions};
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
-    /// let options = KernelOptions::default();
     /// let mut disk = Disk::new(options);
-    /// disk.init()?;
+    /// disk.init().unwrap();
     /// ```
     #[rustfmt::skip]
     pub fn init(&mut self) -> Result<()> {
@@ -64,7 +71,7 @@ impl Disk {
         // 读取目录的所有轨道文件，
         // 将找到的轨道索引创建为轨道类，
         // 并推入内部轨道列表
-        for dir in readdir(self.options.directory)? {
+        for dir in readdir(self.options.path)? {
             if let Ok(name) = dir?.file_name().into_string() {
                 if name.ends_with(".track") {
                     if let Ok(track_id) = name.replace(".track", "").parse::<u16>() {
@@ -90,14 +97,20 @@ impl Disk {
     ///
     /// ```no_run
     /// use super::{Disk, KernelOptions};
+    /// use std::collections::HashMap;
     /// use std::fs::File;
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
-    /// let options = KernelOptions::default();
     /// let mut disk = Disk::new(options);
-    /// disk.init()?;
+    /// disk.init().unwrap();
     ///
-    /// let file = File::open("test.mp4");
-    /// disk.read(file, 0, 19)?;
+    /// let mut file = File::open("test.mp4");
+    /// disk.read(file, HashMap::new()).unwrap();
     /// ```
     #[rustfmt::skip]
     pub fn read(&mut self, mut stream: impl Write, alloc_map: &AllocMap) -> Result<()> {
@@ -128,16 +141,21 @@ impl Disk {
     /// ```no_run
     /// use super::{Disk, KernelOptions};
     /// use std::fs::File;
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
-    /// let options = KernelOptions::default();
     /// let mut disk = Disk::new(options);
-    /// disk.init()?;
+    /// disk.init().unwrap();
     ///
-    /// let file = File::open("test.mp4");
-    /// let (track, index) = disk.write(file)?;
+    /// let mut file = File::open("test.mp4");
+    /// let alloc_map = disk.write(file).unwrap();
     /// ```
     #[rustfmt::skip]
-    pub fn write<'a>(&mut self, mut stream: impl Read) -> Result<AllocMap> {
+    pub fn write(&mut self, mut stream: impl Read) -> Result<AllocMap> {
         let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
         let mut buffer = [0; 2048];
         let mut size = 1;
@@ -179,12 +197,17 @@ impl Disk {
     ///
     /// ```no_run
     /// use super::{Disk, KernelOptions};
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
-    /// let options = KernelOptions::default();
     /// let mut disk = Disk::new(options);
-    /// disk.init()?;
+    /// disk.init().unwrap();
     ///
-    /// disk.remove(0, 16)?;
+    /// disk.remove(0, 16).unwrap();
     /// ```
     #[rustfmt::skip]
     pub fn remove(&mut self, alloc_map: &AllocMap) -> Result<()> {

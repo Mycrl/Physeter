@@ -1,22 +1,18 @@
 mod kernel;
 
-use kernel::{Kernel, KernelOptions};
+use anyhow::Result;
+use kernel::Kernel;
 use std::time::Instant;
 use std::path::Path;
-use anyhow::Result;
 
 fn main() -> Result<()> {
-    let mut kernel = Kernel::new(KernelOptions {
-        directory: Path::new("./data"),
-        track_size: 1024 * 1024 * 1024 * 50,
-        max_memory: 1024 * 1024 * 1024,
-        chunk_size: 1024 * 4,
-    })?;
+    let mut kernel = Kernel::new(
+        Path::new("./.static"), 
+        1024 * 1024 * 1024 * 1
+    )?;
 
-    kernel.open()?;
-
-    let writer = std::fs::File::create("./output.mp4")?;
-    let reader = std::fs::File::open("./末代皇帝.mp4")?;
+    let writer = std::fs::File::create("./testing/output.mp4")?;
+    let reader = std::fs::File::open("./testing/末代皇帝.mp4")?;
 
     let start = Instant::now();
     kernel.write(b"test", reader)?;

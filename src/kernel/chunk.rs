@@ -5,7 +5,7 @@ use std::rc::Rc;
 /// 分片
 ///
 /// 分片以链表形式表示连续存储
-/// 
+///
 /// `next` 下个分片索引  
 /// `data` 分片数据  
 #[derive(Clone, Debug)]
@@ -34,14 +34,19 @@ impl Codec {
     ///
     /// ```no_run
     /// use super::{Codec, KernelOptions};
+    /// use std::rc::Rc;
     ///
-    /// let options = KernelOptions::default();
-    /// Codec::new(&options);
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// Codec::new(Rc::new(options));
     /// ````
     pub fn new(options: Rc<KernelOptions>) -> Self {
         Self {
             diff_size: options.chunk_size - 10,
-            chunk_size: options.chunk_size as usize
+            chunk_size: options.chunk_size as usize,
         }
     }
 
@@ -51,6 +56,7 @@ impl Codec {
     ///
     /// ```no_run
     /// use super::{Chunk, Codec, KernelOptions};
+    /// use std::rc::Rc;
     /// use bytes::Bytes;
     ///
     /// let chunk = Chunk {
@@ -58,8 +64,12 @@ impl Codec {
     ///     data: Bytes::from_static(b"hello"),
     /// };
     ///
-    /// let options = KernelOptions::default();
-    /// let codec = Codec::new(&options);
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let codec = Codec::new(options);
     /// let packet = codec.encoder(chunk.clone());
     /// ```
     #[rustfmt::skip]
@@ -93,6 +103,7 @@ impl Codec {
     ///
     /// ```no_run
     /// use super::{Chunk, Codec, KernelOptions};
+    /// use std::rc::Rc;
     /// use bytes::Bytes;
     ///
     /// let chunk = Chunk {
@@ -100,15 +111,16 @@ impl Codec {
     ///     data: Bytes::from_static(b"hello"),
     /// };
     ///
-    /// let options = KernelOptions::default();
-    /// let codec = Codec::new(&options);
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
+    ///
+    /// let codec = Codec::new(options);
     /// let packet = codec.encoder(chunk.clone());
     /// let result = codec.decoder(packet.clone());
     ///
-    /// assert_eq!(result.id, chunk.id);
-    /// assert_eq!(result.exist, chunk.exist);
     /// assert_eq!(result.next, chunk.next);
-    /// assert_eq!(result.next_track, chunk.next_track);
     /// assert_eq!(result.data, chunk.data);
     /// ```
     #[rustfmt::skip]

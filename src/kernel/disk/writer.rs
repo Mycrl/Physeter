@@ -1,14 +1,14 @@
-use anyhow::Result;
+use super::{AllocMap, Chunk, KernelOptions, Tracks};
 use bytes::{Bytes, BytesMut};
-use super::{KernelOptions, Chunk, Tracks, AllocMap};
 use std::collections::HashMap;
+use anyhow::Result;
 use std::rc::Rc;
 
 /// 写入回调任务
 pub enum Callback {
     Index(u64),
     CreateTrack(u16),
-    Done
+    Done,
 }
 
 /// 链表上个节点
@@ -18,28 +18,20 @@ pub enum Callback {
 pub struct Previous {
     track: u16,
     index: u64,
-    data: BytesMut
+    data: BytesMut,
 }
 
 /// 写入流
 ///
 /// 写入数据到轨道中，
 /// 内部维护游标和写入策略
-///
-/// `tracks` 轨道列表     
-/// `previous` 链表节点缓存  
-/// `callback` 创建轨道回调  
-/// `diff_size` 轨道最大数据长度  
-/// `buffer` 内部缓冲区  
-/// `track` 内部轨道索引  
-/// `id` 分片索引
 pub struct Writer {
-    tracks: Tracks,
     pub alloc_map: AllocMap,
     index: HashMap<u16, usize>,
     previous: Option<Previous>,
     buffer: BytesMut,
     diff_size: usize,
+    tracks: Tracks,
     track: u16,
 }
 
@@ -50,9 +42,14 @@ impl Writer {
     ///
     /// ```no_run
     /// use super::{Writer, KernelOptions};
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
     /// let mut tracks = HashMap::new();
-    /// let options = KernelOptions::default();
     /// let writer = Writer::new(&mut tracks, options);
     /// ```
     pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
@@ -74,14 +71,19 @@ impl Writer {
     /// ```no_run
     /// use super::{Writer, KernelOptions};
     /// use std::collections::HashMap;
+    /// use std::rc::Rc;
+    /// 
+    /// let options = Rc::new(KernelOptions::from(
+    ///     Path::new("./.static"), 
+    ///     1024 * 1024 * 1024 * 1
+    /// ));
     ///
     /// let mut tracks = HashMap::new();
-    /// let options = KernelOptions::default();
     /// let mut writer = Writer::new(&mut tracks, options, async |id| {
     /// ...
     /// });
     ///
-    /// writer.write(&b"hello")?;
+    /// writer.write(Some(&b"hello")).unwrap();
     /// ```
     pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<Option<Callback>> {
         match chunk {
@@ -95,13 +97,14 @@ impl Writer {
     /// 当没有数据写入的时候，
     /// 将会清理写入流内部的状态，
     /// 比如检查未写入的节点以及未处理的数据
+    #[rustfmt::skip]
     fn done(&mut self) -> Result<Option<Callback>> {
-
+        
         // 检查是否有未处理的数据
         // 如果存在未处理数据则将数据全部写入
         if self.buffer.len() > 0 {
             if let Some(callback) = self.write_buffer(&[], true)? {
-                return Ok(Some(callback))
+                return Ok(Some(callback));
             }
         }
 
@@ -119,8 +122,10 @@ impl Writer {
             let mut tracks = self.tracks.borrow_mut();
             tracks.get_mut(track_id).unwrap().flush()?;
         }
-        
-        Ok(Some(Callback::Done))
+
+        Ok(Some(
+            Callback::Done
+        ))
     }
 
     /// 分配写入轨道
@@ -229,13 +234,8 @@ impl Writer {
 
 impl Previous {
     #[rustfmt::skip]
-    pub fn into_chunk(
-        &self,
-        next: Option<u64>
-    ) -> Chunk {
-        Chunk {
-            data: Bytes::copy_from_slice(&self.data[..]),
-            next,
-        }
+    pub fn into_chunk(&self,next: Option<u64>) -> Chunk {
+        let data = Bytes::copy_from_slice(&self.data[..]);
+        Chunk { data, next }
     }
 }
