@@ -30,7 +30,8 @@ impl Index {
     /// let index = Index::new(options).unwrap();
     /// ```
     pub fn new(options: &KernelOptions) -> Result<Self> {
-        Ok(Self(DB::open_default(options.path)?))
+        let path = options.path.join("index");
+        Ok(Self(DB::open_default(path.as_path())?))
     }
 
     /// 索引是否存在
