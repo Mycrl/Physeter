@@ -1,6 +1,6 @@
 use super::{AllocMap, Tracks};
 use anyhow::Result;
-use bytes::Bytes;
+use bytes::BytesMut;
 
 /// 读取流
 ///
@@ -47,7 +47,7 @@ impl<'a> Reader<'a> {
     /// let data = reader.read().unwrap();
     /// ```
     #[rustfmt::skip]
-    pub fn read(&mut self) -> Result<Option<Bytes>> {
+    pub fn read(&mut self) -> Result<Option<BytesMut>> {
         
         // 如果轨道遍历完成
         // 则返回`None`表示读取为空

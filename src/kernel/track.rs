@@ -11,6 +11,7 @@ use std::rc::Rc;
 /// 删除数据只会标记分片为失效，下次写入将覆盖分片
 pub struct Track {
     options: Rc<KernelOptions>,
+    buffer: Vec<u8>,
     free_start: u64,
     real_size: u64,
     free_end: u64,
@@ -36,6 +37,7 @@ impl Track {
     pub fn new(id: u16, options: Rc<KernelOptions>) -> Result<Track> {
         let path = options.path.join(format!("{}.track", id));
         Ok(Self {
+            buffer: vec![0u8; options.chunk_size as usize],
             chunk: Codec::new(options.clone()),
             file: Fs::new(path.as_path())?,
             free_start: 0,
@@ -91,9 +93,8 @@ impl Track {
     /// let chunk = track.read(10).unwrap();
     /// ```
     pub fn read(&mut self, offset: u64) -> Result<Chunk> {
-        let mut packet = vec![0u8; self.options.chunk_size as usize];
-        self.file.promise_read(&mut packet, offset)?;
-        Ok(self.chunk.decoder(Bytes::from(packet)))
+        self.file.promise_read(&mut self.buffer, offset)?;
+        Ok(self.chunk.decoder(BytesMut::from(&self.buffer[..])))
     }
 
     /// 分配分片写入位置

@@ -4,6 +4,13 @@ version = "0.1.0"
 authors = ["Mr.Panda <xivistudios@gmail.com>"]
 edition = "2018"
 
+[profile.release]
+panic = "abort"
+overflow-checks = true
+opt-level = 3
+lto = true
+debug = true
+
 [dependencies]
 bytes = "0.5.4"
 anyhow = "1.0"

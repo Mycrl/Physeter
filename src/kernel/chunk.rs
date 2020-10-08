@@ -11,7 +11,7 @@ use std::rc::Rc;
 #[derive(Clone, Debug)]
 pub struct Chunk {
     pub next: Option<u64>,
-    pub data: Bytes,
+    pub data: BytesMut,
 }
 
 /// 分片编解码器
@@ -124,7 +124,7 @@ impl Codec {
     /// assert_eq!(result.data, chunk.data);
     /// ```
     #[rustfmt::skip]
-    pub fn decoder(&self, mut chunk: Bytes) -> Chunk {
+    pub fn decoder(&self, mut chunk: BytesMut) -> Chunk {
         let source_next = chunk.get_u64();
         let source_size = chunk.get_u16();
 
@@ -133,7 +133,7 @@ impl Codec {
             _ => source_size as usize,
         };
 
-        let data = chunk.slice(0..size);
+        let data = chunk.split_to(size);
 
         let next = match source_next == 0 {
             false => Some(source_next),

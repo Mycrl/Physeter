@@ -1,6 +1,6 @@
 use super::{AllocMap, Chunk, KernelOptions, Tracks};
-use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
+use bytes::BytesMut;
 use anyhow::Result;
 use std::rc::Rc;
 
@@ -235,7 +235,9 @@ impl Writer {
 impl Previous {
     #[rustfmt::skip]
     pub fn into_chunk(&self,next: Option<u64>) -> Chunk {
-        let data = Bytes::copy_from_slice(&self.data[..]);
-        Chunk { data, next }
+        Chunk { 
+            data: self.data.clone(), 
+            next 
+        }
     }
 }
