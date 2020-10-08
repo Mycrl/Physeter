@@ -157,7 +157,7 @@ impl Disk {
     #[rustfmt::skip]
     pub fn write(&mut self, mut stream: impl Read) -> Result<AllocMap> {
         let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
-        let mut buffer = [0; 2048];
+        let mut buffer = [0; 4096];
         let mut size = 1;
 
         // 无限循环

@@ -44,7 +44,7 @@ impl std::io::Write for Writer {
 
 fn main() -> anyhow::Result<()> {
     let mut kernel = Kernel::new(
-        Path::new("./data"), 
+        Path::new("./.static"), 
         1024 * 1024 * 1024 * 5
     )?;
 
