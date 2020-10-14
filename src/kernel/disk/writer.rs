@@ -4,6 +4,13 @@ use bytes::BytesMut;
 use anyhow::Result;
 use std::rc::Rc;
 
+/// 写入回调任务
+pub enum Callback {
+    Index(u64),
+    CreateTrack(u16),
+    Done,
+}
+
 /// 链表上个节点
 ///
 /// 因为链表的特性导致写入需要延迟，
@@ -18,20 +25,17 @@ pub struct Previous {
 ///
 /// 写入数据到轨道中，
 /// 内部维护游标和写入策略
-pub struct Writer<F> 
-where F: FnMut(u16) -> Result<()> + ?Sized {
+pub struct Writer {
     pub alloc_map: AllocMap,
     index: HashMap<u16, usize>,
     previous: Option<Previous>,
-    callback: Box<F>,
     buffer: BytesMut,
     diff_size: usize,
     tracks: Tracks,
     track: u16
 }
 
-impl<F> Writer<F>
-where F: FnMut(u16) -> Result<()> + ?Sized {
+impl Writer {
     /// 创建写入流
     ///
     /// # Examples
@@ -48,11 +52,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     /// let mut tracks = HashMap::new();
     /// let writer = Writer::new(&mut tracks, options);
     /// ```
-    pub fn new(
-        tracks: Tracks, 
-        options: Rc<KernelOptions>, 
-        callback: Box<F>
-    ) -> Self {
+    pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
         Self {
             diff_size: (options.chunk_size - 10) as usize,
             buffer: BytesMut::new(),
@@ -60,7 +60,6 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
             index: HashMap::new(),
             previous: None,
             track: 1,
-            callback,
             tracks,
         }
     }
@@ -86,13 +85,11 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     ///
     /// writer.write(Some(&b"hello")).unwrap();
     /// ```
-    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<()> {
-        let callback = match chunk {
-            Some(data) => self.write_buffer(data, false)?,
-            None => self.done()?,
-        };
-
-        Ok(())
+    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<Option<Callback>> {
+        match chunk {
+            Some(data) => self.write_buffer(data, false),
+            None => self.done(),
+        }
     }
 
     /// 写入结束
@@ -101,7 +98,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     /// 将会清理写入流内部的状态，
     /// 比如检查未写入的节点以及未处理的数据
     #[rustfmt::skip]
-    fn done(&mut self) -> Result<()> {
+    fn done(&mut self) -> Result<Option<Callback>> {
         
         // 检查是否有未处理的数据
         // 如果存在未处理数据则将数据全部写入
@@ -123,14 +120,16 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
             tracks.get_mut(track_id).unwrap().flush()?;
         }
 
-        Ok(())
+        Ok(Some(
+            Callback::Done
+        ))
     }
 
     /// 分配写入轨道
     ///
     /// 为内部分配合理的轨道游标
     #[rustfmt::skip]
-    fn alloc(&mut self) -> Result<u64> {
+    fn alloc(&mut self) -> Result<Callback> {
         let mut tracks = self.tracks.borrow_mut();
         
         // 无限循环
@@ -140,14 +139,14 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         // 检查轨道是否存在
         // 如果轨道不存在通知上级创建轨道
         if !tracks.contains_key(&self.track) {
-            (self.callback)(self.track)?;
+            return Ok(Callback::CreateTrack(self.track))
         }
 
         // 检查轨道大小是否可以写入分片
         // 如果可以则跳出，否则递加到下个轨道
         let track = tracks.get_mut(&self.track).unwrap();
         if let Some(index) = track.alloc()? {
-            return Ok(index);
+            return Ok(Callback::Index(index));
         } else {
             self.track += 1;
             continue;
@@ -159,7 +158,7 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
     ///
     /// 将数据自动分配到有空间写入的轨道上
     #[rustfmt::skip]
-    fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<()> {
+    fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<Option<Callback>> {
         self.buffer.extend_from_slice(chunk);
         let diff_size = self.diff_size;
 
@@ -180,9 +179,16 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         }
 
         // 尝试分配轨道
+        let index;
+        let alloc_result = self.alloc()?;
+        if let Callback::Index(offset) = alloc_result {
+            index = offset;
+        } else {
+            return Ok(Some(alloc_result))
+        }
+
         // 为了避免不必要的重复写入
         // 所以这里先检查轨道索引是否存在
-        let index= self.alloc()?;
         if !self.index.contains_key(&self.track) {
             self.index.insert(self.track, self.alloc_map.len());
             self.alloc_map.push((self.track, Vec::new()));
@@ -219,6 +225,6 @@ where F: FnMut(u16) -> Result<()> + ?Sized {
         }
     }
 
-        Ok(())
+        Ok(None)
     }
 }

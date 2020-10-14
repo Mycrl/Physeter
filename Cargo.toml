@@ -15,7 +15,6 @@ lto = true
 rocksdb = "0.15.0"
 bytes = "0.5.4"
 anyhow = "1.0"
-hyper = "0.13"
 
 [dependencies.tokio]
 version = "0.2"
