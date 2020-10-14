@@ -1,4 +1,5 @@
 /target
-*.mp4
 /.static
 /testing
+/.vscode
+/.vs

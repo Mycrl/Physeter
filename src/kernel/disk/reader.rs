@@ -1,20 +1,19 @@
 use super::{AllocMap, Tracks};
 use anyhow::Result;
-use bytes::BytesMut;
 
 /// 读取流
 ///
 /// 从轨道中读取数据，
 /// 游标由内部维护
-pub struct Reader<'a> {
-    alloc_map: &'a AllocMap,
+pub struct Reader {
+    alloc_map: AllocMap,
     track_index: usize,
     alloc_size: usize,
     track_id: usize,
     tracks: Tracks,
 }
 
-impl<'a> Reader<'a> {
+impl Reader {
     /// 创建读取流
     ///
     /// # Examples
@@ -25,7 +24,7 @@ impl<'a> Reader<'a> {
     ///
     /// let reader = Reader::new(HashMap::new(), HashMap::new());
     /// ```
-    pub fn new(tracks: Tracks, alloc_map: &'a AllocMap) -> Self {
+    pub fn new(tracks: Tracks, alloc_map: AllocMap) -> Self {
         Self {
             alloc_size: alloc_map.len(),
             track_index: 0,
@@ -47,7 +46,7 @@ impl<'a> Reader<'a> {
     /// let data = reader.read().unwrap();
     /// ```
     #[rustfmt::skip]
-    pub fn read(&mut self) -> Result<Option<BytesMut>> {
+    pub fn read(&mut self) -> Result<Option<Vec<u8>>> {
         
         // 如果轨道遍历完成
         // 则返回`None`表示读取为空
@@ -61,11 +60,11 @@ impl<'a> Reader<'a> {
         let mut tracks = self.tracks.borrow_mut();
         let track = tracks.get_mut(&track_id).unwrap();
         let index = list.get(self.track_index).unwrap();
-        let chunk = track.read(*index)?;
+        let (next, chunk) = track.read(*index)?;
         
         // 如果没有后续分片
         // 则返回`None`表示读取为空
-        if let None = chunk.next {
+        if let None = next {
             return Ok(None);
         }
 
@@ -78,7 +77,7 @@ impl<'a> Reader<'a> {
         }
 
         Ok(Some(
-            chunk.data
+            chunk.to_vec()
         ))
     }
 }

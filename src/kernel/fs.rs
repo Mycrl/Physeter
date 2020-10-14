@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::fs::{read_dir, ReadDir};
-use std::fs::{File, Metadata, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::{File, OpenOptions};
+use std::{io::SeekFrom, fs::Metadata};
+use std::io::{Read, Write, Seek};
 use std::path::Path;
 
 /// 文件
@@ -127,7 +128,7 @@ impl Fs {
     /// let mut fs = Fs::new("./a.text").unwrap();
     /// let buffer = fs.promise_read(&mut buffer, 0).unwrap();
     /// ```
-    pub fn promise_read(&mut self, chunk: &mut [u8], offset: u64) -> Result<()> {
+    pub fn intact_read(&mut self, chunk: &mut [u8], offset: u64) -> Result<()> {
         self.seek(offset)?;
         self.file.read_exact(chunk)?;
         self.cursor_next(chunk.len());
@@ -135,9 +136,6 @@ impl Fs {
     }
 
     /// 设置内部游标
-    ///
-    /// 通过检查偏移是否为内部游标，
-    /// 达到减少系统调用的目的
     #[rustfmt::skip]
     fn seek(&mut self, offset: u64) -> Result<()> {
         if offset == self.cursor { return Ok(()) }
@@ -146,17 +144,13 @@ impl Fs {
         Ok(())
     }
 
-    /// 内部游标推进
-    ///
-    /// 将操作位传递给内部游标
+    /// 推进内部游标
     fn cursor_next(&mut self, size: usize) {
         self.cursor += size as u64;
     }
 }
 
-/// 读取目录所有条目
-///
-/// 返回可迭代的条目流
+/// 读取目录
 ///
 /// # Examples
 ///

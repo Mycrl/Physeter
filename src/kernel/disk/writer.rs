@@ -1,15 +1,8 @@
-use super::{AllocMap, Chunk, KernelOptions, Tracks};
+use super::{AllocMap, KernelOptions, Tracks};
 use std::collections::HashMap;
 use bytes::BytesMut;
 use anyhow::Result;
 use std::rc::Rc;
-
-/// 写入回调任务
-pub enum Callback {
-    Index(u64),
-    CreateTrack(u16),
-    Done,
-}
 
 /// 链表上个节点
 ///
@@ -25,17 +18,20 @@ pub struct Previous {
 ///
 /// 写入数据到轨道中，
 /// 内部维护游标和写入策略
-pub struct Writer {
+pub struct Writer<F> 
+where F: FnMut(u16) -> Result<()> + ?Sized {
     pub alloc_map: AllocMap,
     index: HashMap<u16, usize>,
     previous: Option<Previous>,
+    callback: Box<F>,
     buffer: BytesMut,
     diff_size: usize,
     tracks: Tracks,
-    track: u16,
+    track: u16
 }
 
-impl Writer {
+impl<F> Writer<F>
+where F: FnMut(u16) -> Result<()> + ?Sized {
     /// 创建写入流
     ///
     /// # Examples
@@ -52,7 +48,11 @@ impl Writer {
     /// let mut tracks = HashMap::new();
     /// let writer = Writer::new(&mut tracks, options);
     /// ```
-    pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
+    pub fn new(
+        tracks: Tracks, 
+        options: Rc<KernelOptions>, 
+        callback: Box<F>
+    ) -> Self {
         Self {
             diff_size: (options.chunk_size - 10) as usize,
             buffer: BytesMut::new(),
@@ -60,6 +60,7 @@ impl Writer {
             index: HashMap::new(),
             previous: None,
             track: 1,
+            callback,
             tracks,
         }
     }
@@ -79,17 +80,19 @@ impl Writer {
     /// ));
     ///
     /// let mut tracks = HashMap::new();
-    /// let mut writer = Writer::new(&mut tracks, options, async |id| {
+    /// let mut writer = Writer::new(&mut tracks, options, |id| {
     /// ...
     /// });
     ///
     /// writer.write(Some(&b"hello")).unwrap();
     /// ```
-    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<Option<Callback>> {
-        match chunk {
-            Some(data) => self.write_buffer(data, false),
-            None => self.done(),
-        }
+    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<()> {
+        let callback = match chunk {
+            Some(data) => self.write_buffer(data, false)?,
+            None => self.done()?,
+        };
+
+        Ok(())
     }
 
     /// 写入结束
@@ -98,41 +101,36 @@ impl Writer {
     /// 将会清理写入流内部的状态，
     /// 比如检查未写入的节点以及未处理的数据
     #[rustfmt::skip]
-    fn done(&mut self) -> Result<Option<Callback>> {
+    fn done(&mut self) -> Result<()> {
         
         // 检查是否有未处理的数据
         // 如果存在未处理数据则将数据全部写入
         if self.buffer.len() > 0 {
-            if let Some(callback) = self.write_buffer(&[], true)? {
-                return Ok(Some(callback));
-            }
+            self.write_buffer(&[], true)?;
         }
 
         // 检查是否有未处理的节点
         // 如果有未处理节点则将节点写入
+        let mut tracks = self.tracks.borrow_mut();
         if let Some(previous) = self.previous.as_ref() {
-            let mut tracks = self.tracks.borrow_mut();
             let track = tracks.get_mut(&previous.track).unwrap();
-            track.write(&previous.into_chunk(None), previous.index)?;
+            track.write(None, &previous.data, previous.index)?;
         }
 
         // 遍历所有受影响的轨道
         // 为每个轨道保存状态
         for (track_id, _) in self.index.iter() {
-            let mut tracks = self.tracks.borrow_mut();
             tracks.get_mut(track_id).unwrap().flush()?;
         }
 
-        Ok(Some(
-            Callback::Done
-        ))
+        Ok(())
     }
 
     /// 分配写入轨道
     ///
     /// 为内部分配合理的轨道游标
     #[rustfmt::skip]
-    fn alloc(&mut self) -> Result<Callback> {
+    fn alloc(&mut self) -> Result<u64> {
         let mut tracks = self.tracks.borrow_mut();
         
         // 无限循环
@@ -142,14 +140,14 @@ impl Writer {
         // 检查轨道是否存在
         // 如果轨道不存在通知上级创建轨道
         if !tracks.contains_key(&self.track) {
-            return Ok(Callback::CreateTrack(self.track));
+            (self.callback)(self.track)?;
         }
 
         // 检查轨道大小是否可以写入分片
         // 如果可以则跳出，否则递加到下个轨道
         let track = tracks.get_mut(&self.track).unwrap();
         if let Some(index) = track.alloc()? {
-            return Ok(Callback::Index(index));
+            return Ok(index);
         } else {
             self.track += 1;
             continue;
@@ -161,7 +159,7 @@ impl Writer {
     ///
     /// 将数据自动分配到有空间写入的轨道上
     #[rustfmt::skip]
-    fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<Option<Callback>> {
+    fn write_buffer(&mut self, chunk: &[u8], free: bool) -> Result<()> {
         self.buffer.extend_from_slice(chunk);
         let diff_size = self.diff_size;
 
@@ -182,16 +180,9 @@ impl Writer {
         }
 
         // 尝试分配轨道
-        let index;
-        let alloc_result = self.alloc()?;
-        if let Callback::Index(offset) = alloc_result {
-            index = offset;
-        } else {
-            return Ok(Some(alloc_result))
-        }
-        
         // 为了避免不必要的重复写入
         // 所以这里先检查轨道索引是否存在
+        let index= self.alloc()?;
         if !self.index.contains_key(&self.track) {
             self.index.insert(self.track, self.alloc_map.len());
             self.alloc_map.push((self.track, Vec::new()));
@@ -199,10 +190,10 @@ impl Writer {
 
         // 如果存在节点缓存
         // 则将节点缓存写入到轨道中
-        if let Some(previous) = self.previous.as_mut() {
+        if let Some(previous) = self.previous.as_ref() {
             let mut tracks = self.tracks.borrow_mut();
             let track = tracks.get_mut(&previous.track).unwrap();
-            track.write(&previous.into_chunk(Some(index)), previous.index)?;
+            track.write(Some(index), &previous.data, previous.index)?;
         }
 
         // 如果缓冲区大小比分配长度小
@@ -228,16 +219,6 @@ impl Writer {
         }
     }
 
-        Ok(None)
-    }
-}
-
-impl Previous {
-    #[rustfmt::skip]
-    pub fn into_chunk(&self,next: Option<u64>) -> Chunk {
-        Chunk { 
-            data: self.data.clone(), 
-            next 
-        }
+        Ok(())
     }
 }

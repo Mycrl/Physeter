@@ -1,4 +1,4 @@
-use super::chunk::{Chunk, Codec};
+use super::chunk::Codec;
 use super::{fs::Fs, KernelOptions};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use anyhow::Result;
@@ -92,9 +92,9 @@ impl Track {
     /// 
     /// let chunk = track.read(10).unwrap();
     /// ```
-    pub fn read(&mut self, offset: u64) -> Result<Chunk> {
-        self.file.promise_read(&mut self.buffer, offset)?;
-        Ok(self.chunk.decoder(BytesMut::from(&self.buffer[..])))
+    pub fn read(&mut self, offset: u64) -> Result<(Option<u64>, &[u8])> {
+        self.file.intact_read(&mut self.buffer, offset)?;
+        Ok(self.chunk.decoder(&self.buffer[..]))
     }
 
     /// 分配分片写入位置
@@ -234,8 +234,8 @@ impl Track {
     ///
     /// track.write(&chunk, 20).unwrap();
     /// ```
-    pub fn write(&mut self, chunk: &Chunk, index: u64) -> Result<()> {
-        self.file.write(&self.chunk.encoder(chunk), index)
+    pub fn write(&mut self, next: Option<u64>, chunk: &[u8], index: u64) -> Result<()> {
+        self.file.write(&self.chunk.encoder(next, chunk), index)
     }
 
     /// 写入结束

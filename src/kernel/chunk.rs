@@ -1,18 +1,6 @@
 use super::KernelOptions;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use std::rc::Rc;
-
-/// 分片
-///
-/// 分片以链表形式表示连续存储
-///
-/// `next` 下个分片索引  
-/// `data` 分片数据  
-#[derive(Clone, Debug)]
-pub struct Chunk {
-    pub next: Option<u64>,
-    pub data: BytesMut,
-}
 
 /// 分片编解码器
 ///
@@ -24,7 +12,7 @@ pub struct Chunk {
 /// 所以这里使用分片长度减去17.
 pub struct Codec {
     chunk_size: usize,
-    diff_size: u64,
+    diff_size: usize,
 }
 
 impl Codec {
@@ -45,7 +33,7 @@ impl Codec {
     /// ````
     pub fn new(options: Rc<KernelOptions>) -> Self {
         Self {
-            diff_size: options.chunk_size - 10,
+            diff_size: (options.chunk_size - 10) as usize,
             chunk_size: options.chunk_size as usize,
         }
     }
@@ -73,22 +61,22 @@ impl Codec {
     /// let packet = codec.encoder(chunk.clone());
     /// ```
     #[rustfmt::skip]
-    pub fn encoder(&self, chunk: &Chunk) -> Bytes {
+    pub fn encoder(&self, next_offset: Option<u64>, chunk: &[u8]) -> Bytes {
         let mut packet = BytesMut::new();
 
-        let size = match chunk.data.len() == self.diff_size as usize {
-            false => chunk.data.len() as u16,
+        let size = match chunk.len() == self.diff_size {
+            false => chunk.len() as u16,
             true => 0,
         };
 
-        let next = match chunk.next {
+        let next = match next_offset {
             Some(next) => next,
             None => 0,
         };
 
         packet.put_u64(next);
         packet.put_u16(size);
-        packet.extend_from_slice(&chunk.data);
+        packet.extend_from_slice(&chunk);
 
         if packet.len() < self.chunk_size {
             packet.resize(self.chunk_size, 0);
@@ -124,25 +112,40 @@ impl Codec {
     /// assert_eq!(result.data, chunk.data);
     /// ```
     #[rustfmt::skip]
-    pub fn decoder(&self, mut chunk: BytesMut) -> Chunk {
-        let source_next = chunk.get_u64();
-        let source_size = chunk.get_u16();
+    pub fn decoder<'a>(&self, chunk: &'a [u8]) -> (Option<u64>, &'a [u8]) {
+        assert!(chunk.len() > 10);
+        let source_next = u64::from_be_bytes([
+            chunk[0],
+            chunk[1],
+            chunk[2],
+            chunk[3],
+            chunk[4],
+            chunk[5],
+            chunk[6],
+            chunk[7],
+        ]);
 
-        let size = match source_size {
-            0 => self.diff_size as usize,
-            _ => source_size as usize,
-        };
+        let source_size = u16::from_be_bytes([
+            chunk[8],
+            chunk[9]
+        ]) as usize;
 
-        let data = chunk.split_to(size);
+        let end_offset = match source_size {
+            0 => self.diff_size,
+            _ => source_size,
+        } + 10;
+
+        assert!(end_offset <= chunk.len());
+        let data = &chunk[10..end_offset];
 
         let next = match source_next == 0 {
             false => Some(source_next),
             true => None,
         };
 
-        Chunk {
+        (
             next,
-            data,
-        }
+            data
+        )
     }
 }
