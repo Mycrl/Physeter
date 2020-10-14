@@ -1,4 +1,4 @@
-use super::missing;
+use super::{missing, Kernel};
 use anyhow::Result;
 use hyper::{
     Request,
@@ -6,7 +6,7 @@ use hyper::{
     Body
 };
 
-pub fn handle(req: &Request<Body>) -> Result<Response<Body>> {
+pub fn handle(req: &Request<Body>, kernel: Kernel) -> Result<Response<Body>> {
     match req.uri().path() {
         _ => missing()
     }

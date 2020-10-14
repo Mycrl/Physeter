@@ -17,6 +17,13 @@
 目前还在实现中，无测试版本.
 
 
+### 性能
+* 单线程顺序写入 `HDD: WDCWD10EZEX 1TB` 180MB/s  
+* 单线程顺序读取 `HDD: WDCWD10EZEX 1TB` 544MB/s (有页缓存)
+* 单线程顺序写入 `SSD: Samsung 860 EVO 250GB` 508MB/s  
+* 单线程顺序读取 `SSD: Samsung 860 EVO 250GB` 1325MB/s (有页缓存)
+
+
 ### 概述
 
 - #### Track
