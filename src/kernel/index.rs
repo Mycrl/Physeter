@@ -60,7 +60,7 @@ impl Index {
         Ok(self.0.get_pinned(key)?.is_some())
     }
 
-    /// 索引是否存在
+    /// 删除索引
     ///
     /// # Examples
     ///
@@ -90,7 +90,7 @@ impl Index {
         Ok(())
     }
 
-    /// 索引是否存在
+    /// 获取索引
     ///
     /// # Examples
     ///
