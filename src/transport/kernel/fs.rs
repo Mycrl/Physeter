@@ -1,9 +1,19 @@
 use anyhow::Result;
-use std::fs::{read_dir, ReadDir};
-use std::fs::{File, OpenOptions};
-use std::{io::SeekFrom, fs::Metadata};
-use std::io::{Read, Write, Seek};
 use std::path::Path;
+use std::io::{
+    Read, 
+    Write, 
+    Seek, 
+    SeekFrom
+};
+
+use std::fs::{
+    OpenOptions,
+    Metadata,
+    read_dir, 
+    ReadDir,
+    File,
+};
 
 /// 文件
 ///
@@ -147,6 +157,12 @@ impl Fs {
     /// 推进内部游标
     fn cursor_next(&mut self, size: usize) {
         self.cursor += size as u64;
+    }
+}
+
+impl Drop for Fs {
+    fn drop(&mut self) {
+        self.file.sync_all().unwrap()
     }
 }
 

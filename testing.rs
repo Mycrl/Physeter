@@ -1,5 +1,4 @@
 mod kernel;
-mod server;
 
 use kernel::Kernel;
 use std::time::Instant;

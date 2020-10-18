@@ -1,7 +1,12 @@
 use super::KernelOptions;
-use bytes::{Buf, BufMut, BytesMut};
+use std::path::Path;
 use anyhow::Result;
 use rocksdb::DB;
+use bytes::{
+    Buf, 
+    BufMut, 
+    BytesMut
+};
 
 /// 分配表
 pub type AllocMap = Vec<(u16, Vec<u64>)>;
@@ -30,8 +35,9 @@ impl Index {
     /// let index = Index::new(options).unwrap();
     /// ```
     pub fn new(options: &KernelOptions) -> Result<Self> {
-        let path = options.path.join("index");
-        Ok(Self(DB::open_default(path.as_path())?))
+        let path: &Path = &options.path.as_ref();
+        let index_path = path.join("index");
+        Ok(Self(DB::open_default(index_path)?))
     }
 
     /// 索引是否存在
@@ -60,7 +66,7 @@ impl Index {
         Ok(self.0.get_pinned(key)?.is_some())
     }
 
-    /// 索引是否存在
+    /// 删除索引
     ///
     /// # Examples
     ///
@@ -90,7 +96,7 @@ impl Index {
         Ok(())
     }
 
-    /// 索引是否存在
+    /// 获取索引
     ///
     /// # Examples
     ///

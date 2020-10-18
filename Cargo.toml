@@ -17,5 +17,5 @@ bytes = "0.5.4"
 anyhow = "1.0"
 
 [dependencies.tokio]
-version = "0.2"
+version = "0.3"
 features = ["full"]
