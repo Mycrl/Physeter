@@ -1,15 +1,17 @@
 pub mod reader;
 pub mod writer;
 
+pub use reader::Reader;
 use super::fs::readdir;
-use std::io::{Read, Write};
-use writer::{Writer, Callback};
-use reader::Reader;
 use anyhow::Result;
 use std::{
     collections::HashMap,
     cell::RefCell, 
     rc::Rc
+};
+
+pub use writer::{
+    Writer, Callback
 };
 
 pub use super::{
@@ -117,28 +119,11 @@ impl Disk {
     /// let mut disk = Disk::new(options);
     /// disk.init().unwrap();
     ///
-    /// let mut file = File::open("test.mp4");
-    /// disk.read(file, HashMap::new()).unwrap();
+    /// disk.read(file, vec![1, vec![1, 2, 3]]).unwrap();
     /// ```
     #[rustfmt::skip]
-    pub fn read(&mut self, mut stream: impl Write, alloc_map: AllocMap) -> Result<()> {
-        let mut reader = Reader::new(self.tracks.clone(), alloc_map);
-
-        // 无限循环
-        // 将轨道数据全部读取
-        // 写入外部流中
-    loop {
-        match reader.read()? {
-            Some(data) => stream.write_all(&data)?,
-            None => break
-        }
-    }
-
-        // 写入完成之后
-        // 清空尾部缓冲区，
-        // 将所有数据推入目的地
-        stream.flush()?;
-        Ok(())
+    pub fn read(&mut self, alloc_map: AllocMap) -> Reader {
+        Reader::new(self.tracks.clone(), alloc_map)
     }
 
     /// 打开写入流
@@ -162,40 +147,13 @@ impl Disk {
     /// let alloc_map = disk.write(file).unwrap();
     /// ```
     #[rustfmt::skip]
-    pub fn write(&mut self, mut stream: impl Read) -> Result<AllocMap> {
-        let mut writer = Writer::new(self.tracks.clone(), self.options.clone());
-        let mut buffer = [0; 4096];
-        let mut size = 1;
-
-        // 无限循环
-        // 读取外部源写入轨道
-    loop {
-        
-        // 读取外部流数据
-        // 检查上次读取长度是否为空
-        // 如果不为空则不做重复调用
-        if size != 0 {
-            size = stream.read(&mut buffer)?;   
-        }
-        
-        // 检查数据为空的情况
-        let data = if size > 0 {
-            Some(&buffer[0..size]) 
-        } else { 
-            None
-        };
-        
-        // 向轨道写入数据
-        // 处理写入返回，如创建新轨道，
-        // 如果轨道返回头部索引，说明写入完成
-        if let Some(callback) = writer.write(data)? {
-            match callback {
-                Callback::CreateTrack(track) => self.create_track(track)?,
-                Callback::Done => return Ok(writer.alloc_map),
-                _ => ()
+    pub fn write<F: FnMut(&AllocMap) -> Result<()>>(&mut self, callback: F) -> Writer<dyn FnMut(Callback) -> Result<()> + ?Sized + '_> {
+        Writer::new(self.tracks.clone(), self.options.clone(), Box::new(move |res| {
+            match res {
+                Callback::CreateTrack(id) => self.create_track(id),
+                Callback::Done(x) => callback(x)
             }
-        }
-    }
+        }))
     }
 
     /// 删除数据
@@ -233,7 +191,7 @@ impl Disk {
     /// 创建轨道类并初始化，
     /// 将轨道添加到内部的轨道列表
     #[rustfmt::skip]
-    fn create_track(&mut self, id: u16) -> Result<()> {
+    pub fn create_track(&mut self, id: u16) -> Result<()> {
         let mut track = Track::new(id, self.options.clone())?;
         track.init()?;
         self.tracks

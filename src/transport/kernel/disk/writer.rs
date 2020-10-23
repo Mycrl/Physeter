@@ -9,10 +9,10 @@ use super::{
 };
 
 /// 写入回调任务
-pub enum Callback {
+pub enum Callback<'a> {
     Index(u64),
     CreateTrack(u16),
-    Done,
+    Done(&'a AllocMap),
 }
 
 /// 链表上个节点
@@ -29,17 +29,20 @@ pub struct Previous {
 ///
 /// 写入数据到轨道中，
 /// 内部维护游标和写入策略
-pub struct Writer {
+pub struct Writer<F>
+where F: FnMut(Callback) -> Result<()> {
     pub alloc_map: AllocMap,
     index: HashMap<u16, usize>,
     previous: Option<Previous>,
     buffer: BytesMut,
     diff_size: usize,
     tracks: Tracks,
-    track: u16
+    callback: Box<F>,
+    track: u16,
 }
 
-impl Writer {
+impl<F> Writer<F>
+where F: FnMut(Callback) -> Result<()> {
     /// 创建写入流
     ///
     /// # Examples
@@ -56,7 +59,7 @@ impl Writer {
     /// let mut tracks = HashMap::new();
     /// let writer = Writer::new(&mut tracks, options);
     /// ```
-    pub fn new(tracks: Tracks, options: Rc<KernelOptions>) -> Self {
+    pub fn new(tracks: Tracks, options: Rc<KernelOptions>, callback: Box<F>) -> Self {
         Self {
             diff_size: (options.chunk_size - 10) as usize,
             buffer: BytesMut::new(),
@@ -64,6 +67,7 @@ impl Writer {
             index: HashMap::new(),
             previous: None,
             track: 1,
+            callback,
             tracks,
         }
     }
@@ -89,11 +93,17 @@ impl Writer {
     ///
     /// writer.write(Some(&b"hello")).unwrap();
     /// ```
-    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<Option<Callback>> {
-        match chunk {
-            Some(data) => self.write_buffer(data, false),
-            None => self.done(),
+    pub fn write(&mut self, chunk: Option<&[u8]>) -> Result<()> {
+        let res = match chunk {
+            Some(data) => self.write_buffer(data, false)?,
+            None => self.done()?,
+        };
+
+        if let Some(x) = res {
+            (self.callback)(x)?
         }
+
+        Ok(())
     }
 
     /// 写入结束
@@ -125,7 +135,7 @@ impl Writer {
         }
 
         Ok(Some(
-            Callback::Done
+            Callback::Done(&self.alloc_map)
         ))
     }
 

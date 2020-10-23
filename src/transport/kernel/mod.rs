@@ -36,11 +36,11 @@ mod index;
 mod track;
 pub mod fs;
 
-use disk::Disk;
-use index::Index;
 use anyhow::{anyhow, Result};
-use std::io::{Read, Write};
+use disk::{Reader, Writer, Callback};
+use index::{Index, AllocMap};
 use std::rc::Rc;
+use disk::Disk;
 
 /// 核心配置
 ///
@@ -97,9 +97,9 @@ impl Kernel {
     /// let file = std::fs::File::open("test.mp4")?;
     /// kernel.read(b"test", file).unwrap();
     /// ```
-    pub fn read(&mut self, key: &[u8], stream: impl Write) -> Result<()> {
+    pub fn read(&mut self, key: &[u8]) -> Result<Reader> {
         match self.index.get(key)? {
-            Some(x) => self.disk.read(stream, x),
+            Some(x) => Ok(self.disk.read(x)),
             _ => Err(anyhow!("not found")),
         }
     }
@@ -120,9 +120,11 @@ impl Kernel {
     /// kernel.write(b"test", file).unwrap();
     /// ```
     #[rustfmt::skip]
-    pub fn write(&mut self, key: &[u8], stream: impl Read) -> Result<()> {
+    pub fn write(&mut self, key: &[u8]) -> Result<Writer<dyn FnMut(Callback) -> Result<()>>> {
         if self.index.has(key)? { return Err(anyhow!("not empty")); }
-        self.index.set(key, &self.disk.write(stream)?)
+        Ok(self.disk.write(|x| {
+            self.index.set(key, x)
+        }))
     }
 
     /// 删除数据
@@ -147,6 +149,14 @@ impl Kernel {
                 self.index.remove(key)
             }
         }
+    }
+
+    pub fn create_track(&mut self, id: u16) -> Result<()> {
+        self.disk.create_track(id)
+    }
+
+    pub fn save_allocmap(&mut self, key: &[u8], alloc_map: &AllocMap) -> Result<()> {
+        self.index.set(key, alloc_map)
     }
 }
 

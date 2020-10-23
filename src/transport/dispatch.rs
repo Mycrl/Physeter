@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use anyhow::Result;
 use super::{
     kernel::Kernel,
-    Task
+    Task,
+    Flag
 };
 
 use tokio::sync::{
@@ -13,7 +14,7 @@ use tokio::sync::{
 pub struct Dispatch {
     sender: Sender<Task>, 
     reader: Receiver<Task>,
-    readers: HashSet<u32>,
+    // readers: HashMap<u32>,
     kernel: Kernel
 }
 
@@ -26,7 +27,7 @@ impl Dispatch {
     ) -> Result<Self> {
         Ok(Self {
             kernel: Kernel::new(path, track_size)?,
-            readers: HashSet::new(),
+            // readers: HashSet::new(),
             sender,
             reader
         })
@@ -35,12 +36,27 @@ impl Dispatch {
     fn poll(&mut self) {
         loop {
             if let Some(task) = self.reader.blocking_recv() {
-                
+                match task {
+                    Task::Begin(flag, id, key) => {
+                        match flag {
+                            Flag::Reader => {
+
+                            },
+                            _ => {
+
+                            }
+                        }
+                    },
+                    _ => {
+
+                    }
+                }
             }
         }
     }
 }
 
+/// 启动核心线程
 pub fn run(
     path: String, 
     track_size: u64, 
