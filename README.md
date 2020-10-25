@@ -8,10 +8,10 @@
 ![stars](https://img.shields.io/github/stars/quasipaa/Physeter)
 ![author](https://img.shields.io/badge/author-Mr.Panda-read)
 
-对象存储核心，对于管理大量小文件有非常大的优势，以及优化了WAF（写入放大）等问题，因为磁盘IO的特性，目前只采用了单线程顺序读写的方式，以达到性能最大化的目的.
+This is an object storage core library that has great advantages in managing a large number of small files and optimizing WAF (write amplification) and other issues. Due to the characteristics of disk IO, currently only single-threaded sequential read and write methods are used to maximize read and write performance.
 
 
-### 快速开始
+### Quick start
 
 ```rust
 use physeter::Kernel;
@@ -33,18 +33,18 @@ fn main() {
 ```
 
 
-### 性能
+### Performance
 ```
-单线程顺序写入 `HDD: WDCWD10EZEX 1TB` 180MB/s  
-单线程顺序读取 `HDD: WDCWD10EZEX 1TB` 544MB/s (有页缓存)
-单线程顺序写入 `SSD: Samsung 860 EVO 250GB` 508MB/s  
-单线程顺序读取 `SSD: Samsung 860 EVO 250GB` 1325MB/s (有页缓存)
+Single thread sequential write `HDD: WDCWD10EZEX 1TB` 180MB/s  
+Single thread sequential read `HDD: WDCWD10EZEX 1TB` 544MB/s
+Single thread sequential write `SSD: Samsung 860 EVO 250GB` 508MB/s  
+Single thread sequential read `SSD: Samsung 860 EVO 250GB` 1325MB/s
 ```
 
 
-### 概述
+### Overview
 
-数据以固定大小`(4KB)`分片写入轨道文件，使用轨道文件的目的是为了兼容部分文件系统的单文件最大容量，轨道文件头部保存了当前轨道已经释放的块链表，保存尾部的目的是为了链表的快速追加，每个分片内部具有链表形式的下个分片位置以及当前分片内容长度，这虽然会导致一些空间浪费，但这是无法避免的.
+The Data is written into the trace file in `(4KB)`fixed-size segments. The purpose of using trace files is to be compatible with the maximum capacity of a single file in some file systems. The beginning of the track file stores the beginning and end of the linked list of released blocks in the current track. Each fragment saves the position of the next fragment and the length of the current fragment content in the form of a linked list. Although this will cause some space waste, it is inevitable.
 
 ```
     
@@ -57,7 +57,8 @@ fn main() {
             |-> free chunk list first offset
 ```
 
-轨道内部并不实现文件分配表，文件分配表由外部KV存储维护.
+There is no file allocation table in the track, this table is maintained by external KV storage.
+
 
 ### License
 [GPL](./LICENSE)
