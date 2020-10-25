@@ -1,15 +1,23 @@
+
 pub mod reader;
 pub mod writer;
 
 use super::fs::readdir;
-pub use super::index::AllocMap;
-pub use super::{track::Track, KernelOptions};
-use std::{collections::HashMap};
-use std::{cell::RefCell, rc::Rc};
 use std::io::{Read, Write};
 use writer::{Writer, Callback};
 use reader::Reader;
 use anyhow::Result;
+use std::{
+    collections::HashMap,
+    cell::RefCell, 
+    rc::Rc
+};
+
+pub use super::{
+    index::AllocMap,
+    track::Track,
+    KernelOptions
+};
 
 /// 轨道列表
 pub type Tracks = Rc<RefCell<HashMap<u16, Track>>>;
@@ -71,7 +79,7 @@ impl Disk {
         // 读取目录的所有轨道文件，
         // 将找到的轨道索引创建为轨道类，
         // 并推入内部轨道列表
-        for dir in readdir(self.options.path)? {
+        for dir in readdir(&self.options.path)? {
             if let Ok(name) = dir?.file_name().into_string() {
                 if name.ends_with(".track") {
                     if let Ok(track_id) = name.replace(".track", "").parse::<u16>() {

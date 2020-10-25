@@ -1,5 +1,4 @@
 mod kernel;
-mod server;
 
 use kernel::Kernel;
 use std::time::Instant;
@@ -45,7 +44,7 @@ impl std::io::Write for Writer {
 
 fn main() -> anyhow::Result<()> {
     let mut kernel = Kernel::new(
-        Path::new("./.static"), 
+        "./.static".to_string(), 
         1024 * 1024 * 1024 * 5
     )?;
 

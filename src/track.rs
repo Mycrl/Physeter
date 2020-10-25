@@ -1,8 +1,18 @@
-use super::chunk::Codec;
-use super::{fs::Fs, KernelOptions};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use anyhow::Result;
+use std::path::Path;
 use std::rc::Rc;
+use bytes::{
+    Buf, 
+    BufMut, 
+    Bytes, 
+    BytesMut
+};
+
+use super::{
+    fs::Fs,
+    chunk::Codec,
+    KernelOptions
+};
 
 /// 存储轨道
 ///
@@ -35,11 +45,12 @@ impl Track {
     /// let track = Track::new(0, options).unwrap();
     /// ```
     pub fn new(id: u16, options: Rc<KernelOptions>) -> Result<Track> {
-        let path = options.path.join(format!("{}.track", id));
+        let path: &Path = options.path.as_ref();
+        let track_path = path.join(format!("{}.track", id));
         Ok(Self {
             buffer: vec![0u8; options.chunk_size as usize],
             chunk: Codec::new(options.clone()),
-            file: Fs::new(path.as_path())?,
+            file: Fs::new(track_path)?,
             free_start: 0,
             real_size: 0,
             free_end: 0,
